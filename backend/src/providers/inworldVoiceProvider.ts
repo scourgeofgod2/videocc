@@ -17,7 +17,17 @@ const execFileAsync = promisify(execFile);
 
 const INWORLD_TTS_URL = 'https://api.inworld.ai/tts/v1/voice';
 
-/** Get audio duration in seconds using ffprobe. */
+/** Estimate audio duration from file size (128 kbps MP3 ≈ 16 KB/s) */
+function estimateDurationFromSize(filePath: string): number {
+  try {
+    const bytes = fs.statSync(filePath).size;
+    return Math.max(1, bytes / (128 * 1024 / 8));
+  } catch {
+    return 5; // last resort fallback
+  }
+}
+
+/** Get audio duration in seconds using ffprobe; falls back to file-size estimate. */
 async function getAudioDuration(filePath: string): Promise<number> {
   try {
     const { stdout } = await execFileAsync(ffprobeStatic.path, [
@@ -28,10 +38,13 @@ async function getAudioDuration(filePath: string): Promise<number> {
     ]);
     const info = JSON.parse(stdout) as { streams?: Array<{ duration?: string }> };
     const dur = parseFloat(info.streams?.[0]?.duration ?? '0');
-    return isNaN(dur) ? 0 : dur;
+    if (!isNaN(dur) && dur > 0) return dur;
   } catch {
-    return 0;
+    // fall through to estimate
   }
+  const estimate = estimateDurationFromSize(filePath);
+  console.warn(`[voice/inworld] ffprobe returned 0 for ${filePath}, using size estimate ${estimate.toFixed(1)}s`);
+  return estimate;
 }
 
 export class InworldVoiceProvider implements VoiceProvider {

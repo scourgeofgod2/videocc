@@ -32,6 +32,9 @@ export interface CreateRunBody {
   voiceProvider?: "cortexai" | "google_tts" | "inworld"
   customInstructions?: string
   subtitles?: string[]
+  useGpu?: boolean
+  gpuEncoder?: "nvenc" | "amf" | "qsv"
+  imageModel?: "kie" | "nano-banana"
 }
 
 export interface FormatOption {

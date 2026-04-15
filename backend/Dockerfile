@@ -30,6 +30,13 @@ RUN apk add --no-cache \
     font-noto \
     font-dejavu \
     ca-certificates \
+    curl \
+    unzip \
+    && mkdir -p /usr/share/fonts/inter /tmp/inter_unzip \
+    && curl -fsSL "https://github.com/rsms/inter/releases/download/v4.0/Inter-4.0.zip" -o /tmp/inter.zip \
+    && unzip -j /tmp/inter.zip "*.ttf" -d /tmp/inter_unzip \
+    && mv /tmp/inter_unzip/*.ttf /usr/share/fonts/inter/ \
+    && rm -rf /tmp/inter.zip /tmp/inter_unzip \
     && fc-cache -fv
 
 # Copy built JS + production node_modules from builder

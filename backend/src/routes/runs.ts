@@ -117,6 +117,9 @@ export function runsRouter(config: AppConfig): Router {
       aspectRatio = '16:9',
       voiceId,
       voiceProvider,
+      useGpu,
+      gpuEncoder,
+      imageModel,
     } = req.body as {
       topic?: string;
       numSections?: number;
@@ -128,6 +131,9 @@ export function runsRouter(config: AppConfig): Router {
       aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3' | '3:4';
       voiceId?: string;
       voiceProvider?: string;
+      useGpu?: boolean;
+      gpuEncoder?: 'nvenc' | 'amf' | 'qsv';
+      imageModel?: 'kie' | 'nano-banana';
     };
 
     if (!topic) return res.status(400).json({ error: 'topic is required' });
@@ -146,13 +152,16 @@ export function runsRouter(config: AppConfig): Router {
     const outputBase = process.env['OUTPUT_DIR'] ?? 'output';
     void runPipeline(run, config, outputBase, {
       scriptFormat,
-      videoLength: videoLength as 'short' | 'medium' | 'long',
+      videoLength: videoLength as 'micro' | 'short' | 'medium' | 'long',
       customInstructions,
       subtitles,
       language,
       aspectRatio,
       voiceId,
       voiceProvider,
+      useGpu,
+      gpuEncoder,
+      imageModel,
     });
 
     return res.status(202).json(run);
@@ -249,13 +258,16 @@ async function runPipeline(
   outputBase: string,
   opts: {
     scriptFormat?: string;
-    videoLength?: 'short' | 'medium' | 'long';
+    videoLength?: 'micro' | 'short' | 'medium' | 'long';
     customInstructions?: string;
     subtitles?: string[];
     language?: 'en' | 'tr';
     aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3' | '3:4';
     voiceId?: string;
     voiceProvider?: string;
+    useGpu?: boolean;
+    gpuEncoder?: 'nvenc' | 'amf' | 'qsv';
+    imageModel?: 'kie' | 'nano-banana';
   },
 ): Promise<void> {
   const log = makeLogger(run.id);
@@ -278,8 +290,21 @@ async function runPipeline(
     }, opts.language ?? 'en', opts.voiceId, opts.voiceProvider);
     saveScript(script, runDir);
 
-    // Step 3: Media — pass aspectRatio so image provider uses correct ratio
-    await generateMedia(config, script, runDir, log, { aspectRatio: opts.aspectRatio }, (s) => {
+    // Step 3: Media — inject imageModel + aspectRatio
+    const imageConfig = opts.imageModel === 'nano-banana'
+      ? {
+          ...config,
+          image: {
+            ...config.image,
+            provider: 'claudegg_image' as const,
+            api_key_env: 'CLAUDEGG_API_KEY',
+            model: 'nano-banana-pro-flash',
+            extra: { ...config.image.extra, aspect_ratio: opts.aspectRatio ?? '16:9' },
+          },
+        }
+      : config;
+
+    await generateMedia(imageConfig, script, runDir, log, { aspectRatio: opts.aspectRatio }, (s) => {
       updateRun(run.id, { script: s });
     });
     saveScript(script, runDir);
@@ -290,8 +315,16 @@ async function runPipeline(
     saveScript(script, runDir);
     updateRun(run.id, { script });
 
-    // Step 4: Assemble — pass aspectRatio so ffmpeg uses correct resolution
-    const videoPath = await assembleVideo(config, script, runDir, log, opts.aspectRatio ?? '16:9');
+    // Step 4: Assemble — inject GPU settings + aspectRatio
+    const gpuConfig = {
+      ...config,
+      video: {
+        ...config.video,
+        use_gpu:     opts.useGpu     ?? false,
+        gpu_encoder: opts.gpuEncoder ?? undefined,
+      },
+    };
+    const videoPath = await assembleVideo(gpuConfig, script, runDir, log, opts.aspectRatio ?? '16:9');
     updateRun(run.id, { status: 'done', videoPath, script });
     log(`done! video: ${videoPath}`);
   } catch (e) {

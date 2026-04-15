@@ -11,7 +11,7 @@ export interface LLMProvider {
       imageStyle?: string;
       imagesPerSection?: number;
       customInstructions?: string;
-      videoLength?: 'short' | 'medium' | 'long';
+      videoLength?: 'micro' | 'short' | 'medium' | 'long';
       scriptFormat?: string;
       videosPerSection?: number;
     },

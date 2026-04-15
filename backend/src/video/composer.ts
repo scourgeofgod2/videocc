@@ -20,6 +20,31 @@ Ffmpeg.setFfprobePath(ffprobeStatic.path);
 
 const execAsync = promisify(exec);
 
+// ── GPU codec helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Returns ffmpeg output option pairs for H.264 encoding.
+ * Falls back to CPU libx264 when use_gpu is false/undefined.
+ */
+function videoCodecArgs(vc: VideoConfig): string[] {
+  if (!vc.use_gpu) {
+    return ['-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p'];
+  }
+  switch (vc.gpu_encoder) {
+    case 'nvenc':
+      // NVIDIA NVENC
+      return ['-c:v', 'h264_nvenc', '-preset', 'p4', '-rc', 'vbr', '-cq', '20', '-pix_fmt', 'yuv420p'];
+    case 'amf':
+      // AMD AMF
+      return ['-c:v', 'h264_amf', '-quality', 'speed', '-qp_i', '20', '-pix_fmt', 'yuv420p'];
+    case 'qsv':
+      // Intel Quick Sync
+      return ['-c:v', 'h264_qsv', '-preset', 'fast', '-global_quality', '20', '-pix_fmt', 'yuv420p'];
+    default:
+      return ['-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p'];
+  }
+}
+
 // ── Clip descriptor ───────────────────────────────────────────────────────────
 
 interface Clip {
@@ -155,6 +180,7 @@ async function concatWithTransitions(
   clips: MuxedClip[],
   outputPath: string,
   transitionDuration = 0.5,
+  videoConfig?: VideoConfig,
 ): Promise<string> {
   if (clips.length === 0) throw new Error('No clips to concat');
   if (clips.length === 1) {
@@ -207,15 +233,13 @@ async function concatWithTransitions(
   const cmd = Ffmpeg();
   for (const inputPath of inputs) cmd.input(inputPath);
 
+  const codecOpts1 = videoConfig ? videoCodecArgs(videoConfig) : ['-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p'];
   cmd
     .complexFilter(filterComplex)
     .outputOptions([
       `-map [vout]`,
       `-map [aout]`,
-      `-c:v libx264`,
-      `-preset fast`,
-      `-crf 18`,
-      `-pix_fmt yuv420p`,
+      ...codecOpts1,
       `-c:a aac`,
       `-b:a 192k`,
       `-movflags +faststart`,
@@ -235,20 +259,19 @@ async function concatWithTransitions(
 
 // ── Simple concat (no transitions) as fallback ────────────────────────────────
 
-async function simpleConcatClips(clips: MuxedClip[], outputPath: string): Promise<string> {
+async function simpleConcatClips(clips: MuxedClip[], outputPath: string, videoConfig?: VideoConfig): Promise<string> {
   const listFile = outputPath + '.list.txt';
   const listContent = clips.map(c => `file '${c.path.replace(/\\/g, '/')}'`).join('\n');
   fs.writeFileSync(listFile, listContent);
+
+  const codecOpts2 = videoConfig ? videoCodecArgs(videoConfig) : ['-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p'];
 
   return new Promise((resolve, reject) => {
     Ffmpeg()
       .input(listFile)
       .inputOptions(['-f concat', '-safe 0'])
       .outputOptions([
-        `-c:v libx264`,
-        `-preset fast`,
-        `-crf 18`,
-        `-pix_fmt yuv420p`,
+        ...codecOpts2,
         `-c:a aac`,
         `-b:a 192k`,
         `-movflags +faststart`,
@@ -336,14 +359,14 @@ export async function composeVideo(
   try {
     if (useTransitions && muxedClips.length > 1) {
       log(`using xfade transitions (${transitionDuration}s)`);
-      await concatWithTransitions(muxedClips, concatOutputPath, transitionDuration);
+      await concatWithTransitions(muxedClips, concatOutputPath, transitionDuration, videoConfig);
     } else {
       log('using simple concat (no transitions)');
-      await simpleConcatClips(muxedClips, concatOutputPath);
+      await simpleConcatClips(muxedClips, concatOutputPath, videoConfig);
     }
   } catch (e) {
     log(`warn: transition concat failed (${e}), falling back to simple concat`);
-    await simpleConcatClips(muxedClips, concatOutputPath);
+    await simpleConcatClips(muxedClips, concatOutputPath, videoConfig);
   }
 
   // ── Subtitle burning ──────────────────────────────────────────────────────
@@ -394,14 +417,12 @@ export async function composeVideo(
       log('[captions] burning subtitles into video...');
       // On Windows paths need escaped backslashes for the ass filter
       const assEscaped = assPath.replace(/\\/g, '/').replace(/:/g, '\\:');
+      const burnCodec = videoCodecArgs(videoConfig);
       await runFfmpeg([
         '-y',
         '-i', concatOutputPath,
         '-vf', `ass=${assEscaped}`,
-        '-c:v', 'libx264',
-        '-preset', 'fast',
-        '-crf', '18',
-        '-pix_fmt', 'yuv420p',
+        ...burnCodec,
         '-c:a', 'copy',
         '-movflags', '+faststart',
         outputPath,

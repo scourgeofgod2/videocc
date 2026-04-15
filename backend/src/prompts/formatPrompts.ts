@@ -82,7 +82,7 @@ interface FormatConfig {
 
 const FORMATS: Record<string, FormatConfig> = {
   listicle: {
-    label: 'Listicle',
+    label: 'Liste',
     continuous: false,
     systemPrompt:
       'You are an engaging YouTube script writer. Output ONLY valid JSON, nothing else.\n' +
@@ -102,7 +102,7 @@ const FORMATS: Record<string, FormatConfig> = {
       '- All OTHER image prompts must have NO TEXT — purely visual imagery',
   },
   true_crime: {
-    label: 'True Crime',
+    label: 'Gerçek Suç',
     continuous: true,
     systemPrompt:
       'You are a compelling true-crime documentary narrator. Output ONLY valid JSON, nothing else.\n' +
@@ -124,7 +124,7 @@ const FORMATS: Record<string, FormatConfig> = {
       '- ALL image and video prompts must be atmospheric, moody, cinematic — NO TEXT in any image',
   },
   history: {
-    label: 'History / Documentary',
+    label: 'Tarih / Belgesel',
     continuous: true,
     systemPrompt:
       'You are an authoritative yet engaging history documentary narrator. Output ONLY valid JSON, nothing else.\n' +
@@ -146,7 +146,7 @@ const FORMATS: Record<string, FormatConfig> = {
       '- ALL image and video prompts must be historically themed, cinematic — NO TEXT in any image',
   },
   tutorial: {
-    label: 'Tutorial / How-To',
+    label: 'Nasıl Yapılır',
     continuous: false,
     systemPrompt:
       'You are a clear, friendly, and expert tutorial presenter. Output ONLY valid JSON, nothing else.\n' +
@@ -168,7 +168,7 @@ const FORMATS: Record<string, FormatConfig> = {
       '- ALL image and video prompts must be clean, instructional visuals — NO TEXT in any image',
   },
   story: {
-    label: 'Story / Narrative',
+    label: 'Hikaye / Anlatı',
     continuous: true,
     systemPrompt:
       'You are a masterful storyteller and YouTube narrator. Output ONLY valid JSON, nothing else.\n' +
@@ -191,7 +191,7 @@ const FORMATS: Record<string, FormatConfig> = {
       '- Describe the SAME characters and settings consistently across all sections',
   },
   essay: {
-    label: 'Video Essay',
+    label: 'Video Deneme',
     continuous: false,
     systemPrompt:
       'You are a thoughtful, analytical video essayist. Output ONLY valid JSON, nothing else.\n' +
@@ -211,6 +211,72 @@ const FORMATS: Record<string, FormatConfig> = {
       '- Each section presents a key argument, point, or perspective\n' +
       '- Use intellectual transitions that connect ideas logically\n' +
       '- ALL image and video prompts must be conceptual, artistic, or symbolic — NO TEXT in any image',
+  },
+  motivation: {
+    label: 'Motivasyon',
+    continuous: false,
+    systemPrompt:
+      'You are a powerful motivational speaker and YouTube creator. Output ONLY valid JSON, nothing else.\n' +
+      'Write narration that is energetic, inspiring, and emotionally charged — like a TED Talk meets Tony Robbins.\n' +
+      'Use rhetorical questions, powerful metaphors, and calls to action.\n' +
+      'Image prompts should describe empowering, aspirational scenes — people achieving, sunrises, epic landscapes.\n' +
+      'Video prompts must describe dynamic camera movement — sweeping aerials, fast push-ins, dramatic reveals.',
+    narrationExample: 'Energetic, inspiring narration that motivates and uplifts, building to a powerful call to action',
+    introImageStyle: 'powerful motivational thumbnail with bold white uppercase hook text in center, sunrise or epic landscape background, dramatic lighting, 16:9',
+    firstImageStyle: 'cinematic wide shot of an aspirational or empowering scene relevant to this point — person achieving, epic landscape, symbolic imagery, NO TEXT',
+    secondImageStyle: 'close-up on a human detail or symbolic element that reinforces the motivational message — a determined face, raised fist, open horizon, NO TEXT',
+    firstVideoStyle: 'Sweeping aerial establishing shot over an epic landscape or cityscape, golden hour lighting, sense of scale and possibility',
+    secondVideoStyle: 'Dynamic push-in toward a person in motion or a symbolic object, energetic camera, warm golden tones',
+    outroImageStyle: 'triumphant sunrise or achievement scene with subscribe overlay in corner, warm golden tones, epic scale, 16:9',
+    rules:
+      '- Narration should be punchy, energetic, and inspiring — NO numbered countdown announcements\n' +
+      '- Each section builds on the previous, escalating toward a powerful conclusion\n' +
+      '- Use short, impactful sentences mixed with longer metaphorical descriptions\n' +
+      '- ALL image and video prompts must be aspirational, empowering, cinematic — NO TEXT in any image',
+  },
+  technology: {
+    label: 'Teknoloji',
+    continuous: false,
+    systemPrompt:
+      'You are an expert tech reviewer and YouTube creator. Output ONLY valid JSON, nothing else.\n' +
+      'Write narration that is knowledgeable, engaging, and accessible — explaining complex tech clearly.\n' +
+      'Use analogies, comparisons, and real-world examples.\n' +
+      'Image prompts should describe sleek tech visuals, product shots, and futuristic aesthetics.\n' +
+      'Video prompts must describe smooth camera movement around devices, circuit boards, interfaces — cinematic product-reveal style.',
+    narrationExample: 'Clear, engaging tech explanation with analogies and real-world examples, accessible yet knowledgeable',
+    introImageStyle: 'sleek modern tech thumbnail with bold text title, dark background with glowing tech elements, futuristic lighting, 16:9',
+    firstImageStyle: 'clean product shot or tech visual relevant to this point, sleek dark background, blue or purple accent lighting, NO TEXT',
+    secondImageStyle: 'close-up detail of a circuit board, screen interface, or key tech component, sharp macro focus, NO TEXT',
+    firstVideoStyle: 'Slow orbiting product reveal shot, dark background, dramatic edge lighting, smooth rotation',
+    secondVideoStyle: 'Push-in close-up on a key detail of the tech — screen, component, or interface, cinematic macro movement',
+    outroImageStyle: 'futuristic tech landscape or product lineup, subscribe overlay in corner, dark sleek aesthetic, 16:9',
+    rules:
+      '- Narration should be expert yet accessible — NO numbered countdown announcements\n' +
+      '- Each section covers a distinct aspect, feature, or implication of the technology\n' +
+      '- Use natural transitions that build understanding progressively\n' +
+      '- ALL image and video prompts must be sleek, futuristic, tech-aesthetic — NO TEXT in any image',
+  },
+  travel: {
+    label: 'Gezi / Seyahat',
+    continuous: false,
+    systemPrompt:
+      'You are a passionate travel filmmaker and YouTube creator. Output ONLY valid JSON, nothing else.\n' +
+      'Write narration that is evocative, wanderlust-inducing, and culturally rich.\n' +
+      'Describe sights, sounds, tastes, and experiences vividly.\n' +
+      'Image prompts should describe stunning landscapes, iconic landmarks, and authentic cultural scenes.\n' +
+      'Video prompts must describe sweeping cinematic camera movement — aerials, golden hour glides, slow reveals of vistas.',
+    narrationExample: 'Evocative, sensory-rich travel narration that makes the viewer feel transported to the destination',
+    introImageStyle: 'stunning travel destination thumbnail with bold location name text in center, golden hour or dramatic sky, epic landscape, 16:9',
+    firstImageStyle: 'wide cinematic establishing shot of the destination or landmark for this section, golden hour lighting, stunning composition, NO TEXT',
+    secondImageStyle: 'intimate cultural or detail shot — local food, architectural detail, person in traditional clothing, market scene — NO TEXT',
+    firstVideoStyle: 'Sweeping aerial or gliding drone shot establishing the destination, golden hour light, vast landscape visible',
+    secondVideoStyle: 'Slow tracking shot through the local scene or along the landmark, warm tones, immersive camera movement',
+    outroImageStyle: 'breathtaking sunset or panoramic travel scene with subscribe overlay in corner, warm golden tones, epic scale, 16:9',
+    rules:
+      '- Narration should be immersive and sensory — NO numbered countdown announcements\n' +
+      '- Each section covers a different location, attraction, or cultural experience\n' +
+      '- Use natural geographic or experiential transitions between sections\n' +
+      '- ALL image and video prompts must be stunning, travel-themed, cinematic — NO TEXT in any image',
   },
 };
 

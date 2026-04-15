@@ -52,14 +52,14 @@ function resolveColour(hex: string): string {
 
 function defaultCaptionConfig(vc: VideoConfig): CaptionConfig {
   return {
-    fontName:      vc.caption_font      ?? 'Arial',
+    fontName:      vc.caption_font      ?? 'Inter',
     fontSize:      vc.caption_font_size ?? 60,
     primaryColour: resolveColour(vc.caption_text_color ?? '#FFFFFF'),
     outlineColour: resolveColour('#000000'),
     outline:       2,
     shadow:        1,
     bold:          1,
-    marginV:       vc.caption_position  ?? 80,
+    marginV:       vc.caption_position  ?? 550,   // higher up from bottom
     wordsPerGroup: 5,
     uppercase:     vc.caption_uppercase ?? true,
   };

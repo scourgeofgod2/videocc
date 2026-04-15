@@ -15,6 +15,7 @@ const STATUS_LABEL: Record<RunState["status"], string> = {
 }
 
 const LENGTH_LABEL: Record<string, string> = {
+  micro: "Mikro (<60sn)",
   short: "Kısa",
   medium: "Orta",
   long: "Uzun",

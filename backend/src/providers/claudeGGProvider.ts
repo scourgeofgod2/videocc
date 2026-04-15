@@ -9,6 +9,14 @@ import type { Script, Section, ProviderConfig } from '../models.js';
 const MAX_RETRIES = 2;
 
 const VIDEO_LENGTH_INSTRUCTIONS: Record<string, string> = {
+  micro: `
+VIDEO LENGTH: MICRO (under 60 seconds total — strict)
+- intro_narration: EXACTLY 1 short punchy sentence (max 10 words). No greetings, no fluff.
+- Each section narration: EXACTLY 1 sentence (max 15 words). One key fact only. Be brutally concise.
+- outro_narration: EXACTLY 1 very short sentence (max 8 words). Simple call to action.
+- NO filler words, NO transitions, NO elaboration.
+- The ENTIRE video must fit in under 60 seconds when spoken aloud.
+- Overall tone: ultra-fast, punchy, social-media ready (TikTok/Reels style)`,
   short: `
 VIDEO LENGTH: SHORT (1.5–3 minutes total)
 - intro_narration: 2 concise sentences — quick hook, no fluff
@@ -118,7 +126,7 @@ export class ClaudeGGProvider implements LLMProvider {
       imageStyle?: string;
       imagesPerSection?: number;
       customInstructions?: string;
-      videoLength?: 'short' | 'medium' | 'long';
+      videoLength?: 'micro' | 'short' | 'medium' | 'long';
       scriptFormat?: string;
       videosPerSection?: number;
     } = {},

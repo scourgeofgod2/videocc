@@ -41,6 +41,9 @@ export function TopicForm({ onSubmit, loading }: Props) {
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [formats, setFormats] = useState<FormatOption[]>([])
   const [googleVoices, setGoogleVoices] = useState<GoogleTtsVoice[]>([])
+  const [useGpu, setUseGpu] = useState(false)
+  const [gpuEncoder, setGpuEncoder] = useState<"nvenc" | "amf" | "qsv">("nvenc")
+  const [imageModel, setImageModel] = useState<"kie" | "nano-banana">("kie")
 
   useEffect(() => {
     api.getFormats().then(setFormats).catch(console.error)
@@ -72,6 +75,9 @@ export function TopicForm({ onSubmit, loading }: Props) {
       // voiceId: for CortexAI = ElevenLabs voice ID, for Google = voice name (e.g. 'Kore')
       voiceId: isGoogle ? googleVoiceName : (isCortex ? voiceId : undefined),
       customInstructions: customInstructions.trim() || undefined,
+      useGpu: useGpu || undefined,
+      gpuEncoder: useGpu ? gpuEncoder : undefined,
+      imageModel,
     })
   }
 
@@ -212,6 +218,7 @@ export function TopicForm({ onSubmit, loading }: Props) {
             onChange={(e) => setVideoLength(e.target.value)}
             disabled={loading}
           >
+            <option value="micro">Mikro (&lt;60 sn) 🔥</option>
             <option value="short">Kısa (1–3 dk)</option>
             <option value="medium">Orta (3–6 dk)</option>
             <option value="long">Uzun (6–10 dk)</option>
@@ -231,6 +238,61 @@ export function TopicForm({ onSubmit, loading }: Props) {
           disabled={loading}
           style={{ width: "100%", background: "var(--bg)", border: "var(--border-w) solid var(--border-strong)", color: "var(--text)", fontFamily: "var(--font)", fontSize: 14, padding: "10px 12px", outline: "none" }}
         />
+      </div>
+
+      {/* Görsel Modeli */}
+      <div className="field">
+        <label className="field__label">Görsel Üretim Motoru</label>
+        <div className="lang-toggle">
+          <button
+            type="button"
+            className={`lang-btn${imageModel === "kie" ? " active" : ""}`}
+            onClick={() => setImageModel("kie")}
+            disabled={loading}
+          >
+            🎨 KIE (Kaliteli)
+          </button>
+          <button
+            type="button"
+            className={`lang-btn${imageModel === "nano-banana" ? " active" : ""}`}
+            onClick={() => setImageModel("nano-banana")}
+            disabled={loading}
+          >
+            ⚡ Nano-Banana (Hızlı)
+          </button>
+        </div>
+      </div>
+
+      {/* GPU Hızlandırma */}
+      <div className="field">
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <input
+            id="use-gpu"
+            type="checkbox"
+            checked={useGpu}
+            onChange={(e) => setUseGpu(e.target.checked)}
+            disabled={loading}
+            style={{ width: 16, height: 16, cursor: "pointer", accentColor: "var(--accent)", flexShrink: 0 }}
+          />
+          <label htmlFor="use-gpu" className="field__label" style={{ margin: 0, cursor: "pointer" }}>
+            ⚡ GPU Hızlandırma (NVENC / AMF / QSV)
+          </label>
+        </div>
+        {useGpu && (
+          <div className="lang-toggle" style={{ marginTop: 8 }}>
+            {(["nvenc", "amf", "qsv"] as const).map((enc) => (
+              <button
+                key={enc}
+                type="button"
+                className={`lang-btn${gpuEncoder === enc ? " active" : ""}`}
+                onClick={() => setGpuEncoder(enc)}
+                disabled={loading}
+              >
+                {enc === "nvenc" ? "🟢 NVIDIA" : enc === "amf" ? "🔴 AMD" : "🔵 Intel"}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Gelişmiş seçenekler */}

@@ -22,8 +22,10 @@ function estimateDuration(bytes: number): number {
 const SUBMIT_URL = 'https://router.claude.gg/api/generate';
 const POLL_BASE  = 'https://router.claude.gg/get';
 
-const POLL_INTERVAL_MS = 5_000;
-const MAX_POLLS        = 120; // ~10 minutes
+const POLL_INTERVAL_MS  = 5_000;
+const MAX_POLLS         = 120;   // ~10 minutes
+const SUBMIT_RETRIES    = 3;     // retry on upstream 5xx
+const SUBMIT_RETRY_DELAY = 5_000; // 5 s between retries
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
@@ -55,7 +57,7 @@ export class CortexAiVoiceProvider implements VoiceProvider {
     };
   }
 
-  /** Submit a voiceover task, return taskId */
+  /** Submit a voiceover task, return taskId (retries on 5xx) */
   private async submit(text: string): Promise<string> {
     const params: Record<string, unknown> = {
       text:      text.trim(),
@@ -64,24 +66,37 @@ export class CortexAiVoiceProvider implements VoiceProvider {
     };
     if (this.voiceId) params['voice_id'] = this.voiceId;
 
-    const resp = await fetch(SUBMIT_URL, {
-      method:  'POST',
-      headers: this.authHeaders,
-      body:    JSON.stringify({ model: 'voiceover', type: 'voiceover', params }),
-    });
+    let lastErr: Error = new Error('submit failed');
+    for (let attempt = 0; attempt <= SUBMIT_RETRIES; attempt++) {
+      if (attempt > 0) {
+        console.warn(`[voice/cortexai] submit retry ${attempt}/${SUBMIT_RETRIES} after ${SUBMIT_RETRY_DELAY / 1000}s…`);
+        await sleep(SUBMIT_RETRY_DELAY);
+      }
 
-    if (!resp.ok) {
-      const err = await resp.text().catch(() => '');
-      throw new Error(`CortexAI TTS submit HTTP ${resp.status}: ${err}`);
-    }
+      const resp = await fetch(SUBMIT_URL, {
+        method:  'POST',
+        headers: this.authHeaders,
+        body:    JSON.stringify({ model: 'voiceover', type: 'voiceover', params }),
+      });
 
-    const data = await resp.json() as Record<string, unknown>;
-    const taskId = (data['task_id'] ?? data['id'] ?? data['taskId']) as string | undefined;
-    if (!taskId) {
-      throw new Error(`CortexAI TTS: no taskId in response: ${JSON.stringify(data)}`);
+      if (!resp.ok) {
+        const err = await resp.text().catch(() => '');
+        lastErr = new Error(`CortexAI TTS submit HTTP ${resp.status}: ${err}`);
+        if (resp.status >= 500 && attempt < SUBMIT_RETRIES) continue;
+        throw lastErr;
+      }
+
+      const data = await resp.json() as Record<string, unknown>;
+      const taskId = (data['task_id'] ?? data['id'] ?? data['taskId']) as string | undefined;
+      if (!taskId) {
+        lastErr = new Error(`CortexAI TTS: no taskId in response: ${JSON.stringify(data)}`);
+        if (attempt < SUBMIT_RETRIES) continue;
+        throw lastErr;
+      }
+      console.log(`[voice/cortexai] task ${taskId} submitted (attempt: ${attempt + 1})`);
+      return taskId;
     }
-    console.log(`[tts/cortex] task ${taskId} submitted`);
-    return taskId;
+    throw lastErr;
   }
 
   /** Poll until FINISHED, return audio URL */

@@ -49,7 +49,7 @@ export function RunList({ runs, selectedId, onSelect }: Props) {
           <div className="run-item__meta">
             <span className={`badge badge--${run.status}`}>{STATUS_LABEL[run.status]}</span>
             <span className="run-item__meta-tag">{run.scriptFormat}</span>
-            <span className="run-item__meta-tag">{run.videoLength === "short" ? "kısa" : run.videoLength === "medium" ? "orta" : "uzun"}</span>
+            <span className="run-item__meta-tag">{run.videoLength === "micro" ? "mikro" : run.videoLength === "short" ? "kısa" : run.videoLength === "medium" ? "orta" : "uzun"}</span>
             <span className="run-item__meta-tag">{run.numSections} bölüm</span>
             <span className="run-item__meta-tag" style={{ marginLeft: "auto" }}>{timeAgo(run.createdAt)}</span>
           </div>

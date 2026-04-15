@@ -12,6 +12,7 @@ import { InworldVoiceProvider } from './providers/inworldVoiceProvider.js';
 import { CortexAiVoiceProvider } from './providers/cortexAiVoiceProvider.js';
 import { GoogleTtsProvider } from './providers/googleTtsProvider.js';
 import { ZImageProvider } from './providers/zImageProvider.js';
+import { ClaudeGGImageProvider } from './providers/claudeGGImageProvider.js';
 import { composeVideo } from './video/composer.js';
 import { generateTtsStylePrompt } from './prompts/ttsStylePrompt.js';
 import { transcribeAudio, toLemonfoxLang } from './providers/lemonfoxSttProvider.js';
@@ -109,6 +110,11 @@ function getImageProvider(config: AppConfig): ImageProvider {
     case 'kieai':
     case 'kie.ai':
       return new ZImageProvider(config.image);
+    case 'claudegg_image':
+    case 'claudegg-image':
+    case 'nano-banana':
+    case 'nano_banana':
+      return new ClaudeGGImageProvider(config.image);
     default:
       throw new Error(`Unknown image provider: ${config.image.provider}`);
   }
@@ -161,7 +167,7 @@ export async function generateScript(
   opts: {
     subtitles?: string[];
     customInstructions?: string;
-    videoLength?: 'short' | 'medium' | 'long';
+    videoLength?: 'micro' | 'short' | 'medium' | 'long';
     scriptFormat?: string;
     imagesPerSection?: number;
     videosPerSection?: number;
@@ -498,7 +504,7 @@ export async function runFullPipeline(
   outputBase: string = 'output',
   opts: {
     scriptFormat?: string;
-    videoLength?: 'short' | 'medium' | 'long';
+    videoLength?: 'micro' | 'short' | 'medium' | 'long';
     customInstructions?: string;
     subtitles?: string[];
   } = {},

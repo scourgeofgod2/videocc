@@ -78,6 +78,10 @@ export interface VideoConfig {
   caption_bg_opacity: number;
   caption_uppercase: boolean;
   caption_position: number;
+  /** GPU hardware encoding: undefined/false = CPU (libx264), true = use gpuEncoder */
+  use_gpu?: boolean;
+  /** GPU encoder codec: 'nvenc' (NVIDIA), 'amf' (AMD), 'qsv' (Intel) */
+  gpu_encoder?: 'nvenc' | 'amf' | 'qsv';
 }
 
 export interface ProviderConfig {
