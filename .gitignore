@@ -1,0 +1,31 @@
+# Dependencies
+backend/node_modules/
+frontend/node_modules/
+
+# Build outputs
+backend/dist/
+frontend/dist/
+
+# Generated video output (do NOT commit — use Docker volume in production)
+backend/output/
+
+# Environment secrets — NEVER commit
+backend/.env
+frontend/.env
+backend/.env.local
+frontend/.env.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# TypeScript cache
+*.tsbuildinfo
