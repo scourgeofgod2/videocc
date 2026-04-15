@@ -1,16 +1,5 @@
 version: "3.9"
 
-# ── Clipmatic Video — Docker Compose ──────────────────────────────────────────
-# Repo kökü: webapp/ klasörü
-# Coolify: bu docker-compose.yml dosyasını seçin
-#
-# Services:
-#   backend   — Node.js API + video pipeline  (port 3001, internal)
-#   frontend  — Nginx + React SPA             (port 80, Coolify proxy ile dışarı)
-#
-# Volumes:
-#   output_data — üretilen videoları deploy'lar arasında saklar
-
 services:
 
   # ── Backend ──────────────────────────────────────────────────────────────────
@@ -23,30 +12,23 @@ services:
       NODE_ENV: production
       PORT: 3001
       OUTPUT_DIR: /data/output
-
-      # ── API Keys (Coolify → Environment Variables bölümünden set edin) ──────
       CLAUDEGG_API_KEY: ${CLAUDEGG_API_KEY:-}
       INWORLD_API_KEY: ${INWORLD_API_KEY:-}
       CORTEXAI_API_KEY: ${CORTEXAI_API_KEY:-}
       CORTEX_API_KEY: ${CORTEX_API_KEY:-}
       ZIMAGE_API_KEY: ${ZIMAGE_API_KEY:-}
       LEMONFOX_API_KEY: ${LEMONFOX_API_KEY:-}
-
-      # ── Opsiyonel ────────────────────────────────────────────────────────────
       IMAGES_PER_SECTION: ${IMAGES_PER_SECTION:-1}
-
     volumes:
       - output_data:/data/output
-
     expose:
       - "3001"
-
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
 
   # ── Frontend ──────────────────────────────────────────────────────────────────
   frontend:
@@ -54,20 +36,11 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     restart: unless-stopped
-    # Coolify's Traefik handles external routing — do NOT bind host port 80
     expose:
       - "80"
     depends_on:
-      backend:
-        condition: service_healthy
+      - backend
 
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:80/"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-
-# ── Volumes ────────────────────────────────────────────────────────────────────
 volumes:
   output_data:
     driver: local
