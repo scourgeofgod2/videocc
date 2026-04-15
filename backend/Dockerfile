@@ -37,8 +37,7 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
 
-# Copy any static assets (fonts, etc.) if they exist
-COPY assets ./assets 2>/dev/null || true
+# (No static assets dir needed — fonts come from system packages above)
 
 # Output directory (will be mounted as a Docker volume in production)
 RUN mkdir -p /data/output
