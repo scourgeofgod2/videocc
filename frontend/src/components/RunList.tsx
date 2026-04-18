@@ -17,10 +17,12 @@ function timeAgo(iso: string): string {
 }
 
 const STATUS_LABEL: Record<RunState["status"], string> = {
-  pending: "Bekliyor",
-  running: "Üretiliyor",
-  done:    "Tamamlandı",
-  error:   "Hata",
+  pending:                   "Bekliyor",
+  running:                   "Üretiliyor",
+  awaiting_approval:         "✍ Script Onayı",
+  awaiting_image_approval:   "🖼 Görsel Onayı",
+  done:                      "Tamamlandı",
+  error:                     "Hata",
 }
 
 export function RunList({ runs, selectedId, onSelect }: Props) {

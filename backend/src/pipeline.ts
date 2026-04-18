@@ -13,6 +13,10 @@ import { CortexAiVoiceProvider } from './providers/cortexAiVoiceProvider.js';
 import { GoogleTtsProvider } from './providers/googleTtsProvider.js';
 import { ZImageProvider } from './providers/zImageProvider.js';
 import { ClaudeGGImageProvider } from './providers/claudeGGImageProvider.js';
+import { PexelsImageProvider } from './providers/pexelsImageProvider.js';
+import { fetchPexelsVideo } from './providers/pexelsVideoProvider.js';
+import { DuckDuckGoImageProvider } from './providers/duckduckgoImageProvider.js';
+import { GoogleImageProvider } from './providers/googleImageProvider.js';
 import { composeVideo } from './video/composer.js';
 import { generateTtsStylePrompt } from './prompts/ttsStylePrompt.js';
 import { transcribeAudio, toLemonfoxLang } from './providers/lemonfoxSttProvider.js';
@@ -102,7 +106,7 @@ function getVoiceProvider(
   }
 }
 
-function getImageProvider(config: AppConfig): ImageProvider {
+function getImageProvider(config: AppConfig, pexelsApiKey?: string): ImageProvider {
   switch (config.image.provider) {
     case 'zimage':
     case 'z_image':
@@ -115,6 +119,17 @@ function getImageProvider(config: AppConfig): ImageProvider {
     case 'nano-banana':
     case 'nano_banana':
       return new ClaudeGGImageProvider(config.image);
+    case 'pexels':
+    case 'pexels_photo':
+      return new PexelsImageProvider(pexelsApiKey ?? process.env['PEXELS_API_KEY'] ?? '');
+    case 'ddg':
+    case 'ddg_image':
+    case 'duckduckgo':
+      return new DuckDuckGoImageProvider();
+    case 'google':
+    case 'google_image':
+    case 'google_images':
+      return new GoogleImageProvider(process.env['GOOGLE_COOKIES'] ?? '');
     default:
       throw new Error(`Unknown image provider: ${config.image.provider}`);
   }
@@ -160,6 +175,118 @@ export function loadScript(scriptPath: string): Script {
 
 // ── Step 1: Generate script ───────────────────────────────────────────────────
 
+/**
+ * Parse user-supplied raw text directly into a Script — no LLM script generation.
+ * The text is split into numSections chunks; LLM is called ONLY to produce image prompts.
+ */
+export async function parseRawTextToScript(
+  config: AppConfig,
+  rawText: string,
+  numSections: number,
+  opts: { imageStyle?: string; aspectRatio?: string; imagesPerSection?: number; mediaSource?: string } = {},
+  log: (msg: string) => void = console.log,
+): Promise<Script> {
+  log('parsing raw text into script sections...');
+
+  // Split into non-empty paragraphs
+  const paragraphs = rawText
+    .split(/\n{2,}/)
+    .map(p => p.trim())
+    .filter(p => p.length > 0);
+
+  // Derive title from first line
+  const firstLine = rawText.split('\n')[0].trim();
+  const title = firstLine.length > 80 ? firstLine.substring(0, 80) + '…' : firstLine;
+
+  // Group paragraphs into numSections chunks
+  const effectiveSections = Math.max(1, Math.min(numSections, paragraphs.length));
+  const chunkSize = Math.ceil(paragraphs.length / effectiveSections);
+  const chunks: string[] = [];
+  for (let i = 0; i < paragraphs.length; i += chunkSize) {
+    chunks.push(paragraphs.slice(i, i + chunkSize).join('\n\n'));
+  }
+  while (chunks.length < effectiveSections) {
+    chunks.push('…');
+  }
+
+  const imagesPerSection = opts.imagesPerSection ?? 1;
+  const imageStyle = opts.imageStyle ?? '';
+
+  // For Pexels / DDG modes, skip LLM image prompt generation entirely.
+  // These providers use the narration text directly as a search query.
+  const isPexels = opts.mediaSource === 'pexels_photo' || opts.mediaSource === 'pexels_video' || opts.mediaSource === 'ddg_image';
+
+  // Default: use first sentence of each chunk as the search/prompt text
+  let imagePrompts: string[][] = chunks.map((chunk) => {
+    const query = chunk.split(/[.\n]/)[0].trim().substring(0, 100) || 'nature scene';
+    return Array(imagesPerSection).fill(query);
+  });
+
+  if (!isPexels) {
+    // Generate cinematic image prompts via LLM — only needed for AI image generation
+    log('generating image prompts for sections...');
+    const apiKey = process.env[config.llm.api_key_env] ?? '';
+    const model = config.llm.model ?? 'claude-sonnet-4-6';
+
+    if (apiKey) {
+      try {
+        const { OpenAI } = await import('openai');
+        const client = new OpenAI({ apiKey, baseURL: 'https://claude.gg/v1' });
+        const styleHint = imageStyle ? ` Style: ${imageStyle}.` : '';
+        const sectionList = chunks
+          .map((c, i) => `Section ${i + 1}: "${c.substring(0, 300)}"`)
+          .join('\n\n');
+        const completion = await client.chat.completions.create({
+          model,
+          max_tokens: 1200,
+          messages: [{
+            role: 'user',
+            content:
+              `For each section below, generate ${imagesPerSection} vivid cinematic image generation prompt(s).${styleHint}\n` +
+              `Return ONLY a JSON array of arrays, one inner array per section, e.g.:\n` +
+              `[["prompt1a","prompt1b"],["prompt2a"]]\n\n${sectionList}`,
+          }],
+        });
+        const raw = completion.choices[0]?.message?.content ?? '[]';
+        const match = raw.match(/\[[\s\S]*\]/);
+        if (match) {
+          const parsed = JSON.parse(match[0]) as string[][];
+          imagePrompts = parsed.map((p, i) =>
+            Array.isArray(p) && p.length > 0 ? p : imagePrompts[i],
+          );
+        }
+      } catch (e) {
+        log(`[warn] image prompt generation failed: ${String(e)}`);
+      }
+    }
+  } else {
+    log(`${opts.mediaSource} mode — skipping LLM image prompt generation, using section text as search queries`);
+  }
+
+  // Build Script object
+  const sections = chunks.map((chunk, i) => ({
+    number: i + 1,
+    heading: `Bölüm ${i + 1}`,
+    narration: chunk,
+    image_prompt: imagePrompts[i]?.[0] ?? 'cinematic scene',
+    image_prompts: imagePrompts[i] ?? ['cinematic scene'],
+    audio_path: undefined,
+    duration: undefined,
+  }));
+
+  const script = {
+    title,
+    intro_narration: '',
+    intro_image_prompt: imagePrompts[0]?.[0] ?? 'cinematic opening scene',
+    sections,
+    outro_narration: '',
+    outro_image_prompt: imagePrompts[imagePrompts.length - 1]?.[0] ?? 'cinematic closing scene',
+  } as unknown as Script;
+
+  log(`raw text parsed: "${title}" (${sections.length} sections)`);
+  return script;
+}
+
 export async function generateScript(
   config: AppConfig,
   topic: string,
@@ -167,10 +294,13 @@ export async function generateScript(
   opts: {
     subtitles?: string[];
     customInstructions?: string;
+    rawText?: string;
     videoLength?: 'micro' | 'short' | 'medium' | 'long';
     scriptFormat?: string;
     imagesPerSection?: number;
     videosPerSection?: number;
+    language?: 'en' | 'tr';
+    mediaSource?: string;
   } = {},
   log: (msg: string) => void = console.log,
 ): Promise<Script> {
@@ -185,9 +315,12 @@ export async function generateScript(
     imageStyle,
     imagesPerSection,
     customInstructions: opts.customInstructions,
+    rawText: opts.rawText,
     videoLength: opts.videoLength ?? 'medium',
     scriptFormat: opts.scriptFormat ?? 'listicle',
     videosPerSection,
+    language: opts.language ?? 'en',
+    mediaSource: opts.mediaSource ?? 'ai_generate',
   });
 
   log(`script done: "${script.title}" (${script.sections.length} sections)`);
@@ -228,20 +361,24 @@ export async function generateVoiceovers(
   type VoiceTask = { label: string; text: string; outputPath: string; assign: (dur: number) => void };
   const tasks: VoiceTask[] = [];
 
-  // Intro
+  // Intro — skip if text is empty (e.g. rawText mode)
   const introPath = path.join(audioDir, 'intro.mp3');
-  if (!fs.existsSync(introPath)) {
-    tasks.push({
-      label: 'Intro',
-      text: script.intro_narration,
-      outputPath: introPath,
-      assign: (dur) => { script.intro_audio_path = introPath; script.intro_duration = dur; },
-    });
+  if (script.intro_narration?.trim()) {
+    if (!fs.existsSync(introPath)) {
+      tasks.push({
+        label: 'Intro',
+        text: script.intro_narration,
+        outputPath: introPath,
+        assign: (dur) => { script.intro_audio_path = introPath; script.intro_duration = dur; },
+      });
+    } else {
+      script.intro_audio_path = introPath;
+      const dur = await probeAudioDuration(introPath);
+      script.intro_duration = dur;
+      log(`skip intro voice (exists, ${dur.toFixed(1)}s)`);
+    }
   } else {
-    script.intro_audio_path = introPath;
-    const dur = await probeAudioDuration(introPath);
-    script.intro_duration = dur;
-    log(`skip intro voice (exists, ${dur.toFixed(1)}s)`);
+    log('skip intro voice (no text)');
   }
 
   // Sections
@@ -264,20 +401,24 @@ export async function generateVoiceovers(
     }
   }
 
-  // Outro
+  // Outro — skip if text is empty
   const outroPath = path.join(audioDir, 'outro.mp3');
-  if (!fs.existsSync(outroPath)) {
-    tasks.push({
-      label: 'Outro',
-      text: script.outro_narration,
-      outputPath: outroPath,
-      assign: (dur) => { script.outro_audio_path = outroPath; script.outro_duration = dur; },
-    });
+  if (script.outro_narration?.trim()) {
+    if (!fs.existsSync(outroPath)) {
+      tasks.push({
+        label: 'Outro',
+        text: script.outro_narration,
+        outputPath: outroPath,
+        assign: (dur) => { script.outro_audio_path = outroPath; script.outro_duration = dur; },
+      });
+    } else {
+      script.outro_audio_path = outroPath;
+      const dur = await probeAudioDuration(outroPath);
+      script.outro_duration = dur;
+      log(`skip outro voice (exists, ${dur.toFixed(1)}s)`);
+    }
   } else {
-    script.outro_audio_path = outroPath;
-    const dur = await probeAudioDuration(outroPath);
-    script.outro_duration = dur;
-    log(`skip outro voice (exists, ${dur.toFixed(1)}s)`);
+    log('skip outro voice (no text)');
   }
 
   log(`launching ${tasks.length} voice task(s) in parallel...`);
@@ -311,19 +452,33 @@ export async function generateMedia(
   script: Script,
   runDir: string,
   log: (msg: string) => void = console.log,
-  opts: { force?: boolean; aspectRatio?: string } = {},
+  opts: { force?: boolean; aspectRatio?: string; mediaSource?: string; imagesPerSection?: number } = {},
   onProgress?: (script: Script) => void,
 ): Promise<Script> {
   log('step 3/4: generating media...');
-  const imageGen = getImageProvider(config);
-  const aspectRatio = opts.aspectRatio; // passed through to image provider
+  const pexelsKey = process.env['PEXELS_API_KEY'] ?? '';
+  const isPexelsVideo = opts.mediaSource === 'pexels_video';
+  const isPexelsPhoto = opts.mediaSource === 'pexels_photo';
+  const isDdgImage = opts.mediaSource === 'ddg_image';
+  const isGoogleImage = opts.mediaSource === 'google_image';
+  let effectiveProvider = config.image.provider;
+  if (isPexelsVideo) { log('media source: Pexels Video 🎬'); }
+  else if (isPexelsPhoto) { effectiveProvider = 'pexels'; log('media source: Pexels Photos 📷'); }
+  else if (isDdgImage) { effectiveProvider = 'ddg_image'; log('media source: DuckDuckGo Images 🦆'); }
+  else if (isGoogleImage) { effectiveProvider = 'google_image'; log('media source: Google Images 🔍'); }
+  else { log(`media source: AI Image Generation (${config.image.provider}) 🤖`); }
+  const effectiveConfig = (isPexelsPhoto || isDdgImage || isGoogleImage)
+    ? { ...config, image: { ...config.image, provider: effectiveProvider } }
+    : config;
+  const imageGen = getImageProvider(effectiveConfig, pexelsKey);
+  const aspectRatio = opts.aspectRatio;
   const imagesDir = path.join(runDir, 'images');
   fs.mkdirSync(imagesDir, { recursive: true });
 
   type ImgTask = { label: string; prompt: string; outputPath: string; assign: (p: string) => void };
   const tasks: ImgTask[] = [];
 
-  const imagesPerSection = config.video.images_per_section ?? 1;
+  const imagesPerSection = opts.imagesPerSection ?? config.video.images_per_section ?? 1;
   const forceRegen = opts.force ?? false;
 
   // Intro image(s)
@@ -399,7 +554,13 @@ export async function generateMedia(
     tasks.map(async (task) => {
       try {
         log(`image start: ${task.label}`);
-        const p = await imageGen.generateImage(task.prompt, task.outputPath, aspectRatio);
+        let p: string;
+        if (isPexelsVideo) {
+          const videoPath = task.outputPath.replace(/\.\w+$/, '.mp4');
+          p = await fetchPexelsVideo(pexelsKey, task.prompt, videoPath, aspectRatio);
+        } else {
+          p = await imageGen.generateImage(task.prompt, task.outputPath, aspectRatio);
+        }
         task.assign(p);
         log(`image done: ${task.label}`);
       } catch (e) {
@@ -555,8 +716,20 @@ export async function regenerateSingleImage(
   prompt: string,
   outputPath: string,
   log: (msg: string) => void = console.log,
+  mediaSource?: string,
 ): Promise<string> {
-  const imageGen = getImageProvider(config);
+  // Resolve config with correct provider based on mediaSource
+  let effectiveConfig = config;
+  if (mediaSource === 'pexels_photo') {
+    effectiveConfig = { ...config, image: { ...config.image, provider: 'pexels' as const } };
+  } else if (mediaSource === 'ddg_image') {
+    effectiveConfig = { ...config, image: { ...config.image, provider: 'ddg_image' as const } };
+  } else if (mediaSource === 'google_image' || mediaSource === 'google_images') {
+    effectiveConfig = { ...config, image: { ...config.image, provider: 'google_image' as const } };
+  }
+
+  const pexelsKey = process.env['PEXELS_API_KEY'] ?? '';
+  const imageGen = getImageProvider(effectiveConfig, pexelsKey);
   log(`regenerating image: ${path.basename(outputPath)}`);
   const p = await imageGen.generateImage(prompt, outputPath);
   log(`image regenerated: ${path.basename(outputPath)}`);

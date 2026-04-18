@@ -13,7 +13,7 @@ import type { VoiceProvider } from './base.js';
 import type { ProviderConfig } from '../models.js';
 
 const TTS_ENDPOINT = 'https://texttospeech.vertexapis.com/v1/text:synthesize';
-const DEFAULT_MODEL = 'gemini-2.5-flash-tts';
+const DEFAULT_MODEL = 'gemini-3.1-flash-tts-preview';
 
 const execAsync = promisify(exec);
 

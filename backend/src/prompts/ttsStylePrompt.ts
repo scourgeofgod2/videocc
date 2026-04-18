@@ -30,29 +30,20 @@ export async function generateTtsStylePrompt(
     baseURL: CLAUDEGG_BASE,
   });
 
+  // Use only intro + first section (max 500 chars) — enough context for style
   const sampleNarration = [
     script.intro_narration,
-    ...(script.sections?.slice(0, 2).map((s) => s.narration) ?? []),
+    script.sections?.[0]?.narration,
   ]
     .filter(Boolean)
     .join(' ')
-    .slice(0, 800);
+    .slice(0, 500);
 
   const langLabel = language === 'tr' ? 'Turkish' : 'English';
 
-  const systemPrompt = `You are a voice direction expert. Given a video script's title, format, and sample narration, write a concise 1–2 sentence voice style instruction for a text-to-speech engine.
+  const systemPrompt = `You are a TTS voice direction expert. Write exactly 1 imperative sentence in ${langLabel} directing the text-to-speech voice style. Mention pace, tone/emotion, energy level, and delivery style. Never mention the topic or any nouns. Max 130 characters. Output ONLY the instruction sentence, nothing else.`;
 
-Rules:
-- Write in ${langLabel} (the TTS language)
-- Use imperative form, e.g. "Speak with a warm, excited tone..." or "Read as a calm documentary narrator..."
-- Be specific: mention pace, emotion, energy level, and delivery style
-- Keep it under 150 characters
-- Do NOT mention the topic or any nouns — only describe the voice style
-- Output ONLY the style prompt, nothing else`;
-
-  const userMsg = `Video title: "${script.title}"
-Format: ${script.format}
-Sample narration: "${sampleNarration}"`;
+  const userMsg = `Title: "${script.title}" | Format: ${script.format}\nSample: "${sampleNarration}"`;
 
   console.log(`[tts/style] generating style prompt for "${script.title.slice(0, 60)}"`);
 
@@ -63,15 +54,15 @@ Sample narration: "${sampleNarration}"`;
         { role: 'system', content: systemPrompt },
         { role: 'user',   content: userMsg },
       ],
-      max_tokens: 80,
-      temperature: 0.4,
+      max_tokens: 50,
+      temperature: 0.3,
     });
 
     const prompt = resp.choices[0]?.message?.content?.trim() ?? '';
     if (!prompt) throw new Error('empty response');
 
-    // Sanity: truncate to 200 chars
-    const final = prompt.slice(0, 200);
+    // Sanity: truncate to 140 chars (matches the 130-char instruction limit with margin)
+    const final = prompt.slice(0, 140);
     console.log(`[tts/style] style prompt: "${final}"`);
     return final;
 

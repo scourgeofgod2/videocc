@@ -2,7 +2,7 @@
 // Ports Python src/providers/wiro_llm_provider.py (JSON repair, retry, format support)
 
 import OpenAI from 'openai';
-import { buildUserPrompt, buildCustomPrompt, getSystemPrompt } from '../prompts/formatPrompts.js';
+import { buildUserPrompt, buildCustomPrompt, buildRawTextPrompt, getSystemPrompt } from '../prompts/formatPrompts.js';
 import type { LLMProvider } from './base.js';
 import type { Script, Section, ProviderConfig } from '../models.js';
 
@@ -126,9 +126,12 @@ export class ClaudeGGProvider implements LLMProvider {
       imageStyle?: string;
       imagesPerSection?: number;
       customInstructions?: string;
+      rawText?: string;
       videoLength?: 'micro' | 'short' | 'medium' | 'long';
       scriptFormat?: string;
       videosPerSection?: number;
+      language?: 'en' | 'tr';
+      mediaSource?: string;
     } = {},
   ): Promise<Script> {
     const {
@@ -136,9 +139,12 @@ export class ClaudeGGProvider implements LLMProvider {
       imageStyle = '',
       imagesPerSection = 1,
       customInstructions = '',
+      rawText = '',
       videoLength = 'medium',
       scriptFormat = 'listicle',
       videosPerSection = 1,
+      language = 'en',
+      mediaSource = 'ai_generate',
     } = opts;
 
     const styleInstruction = imageStyle
@@ -147,7 +153,20 @@ export class ClaudeGGProvider implements LLMProvider {
     const lengthInstruction = VIDEO_LENGTH_INSTRUCTIONS[videoLength] ?? VIDEO_LENGTH_INSTRUCTIONS['medium'];
 
     let userPrompt: string;
-    if (customInstructions) {
+    if (rawText) {
+      // Raw text mode: LLM splits existing text into sections
+      userPrompt = buildRawTextPrompt({
+        fmt: scriptFormat,
+        topic,
+        numSections,
+        rawText,
+        styleInstruction,
+        imagesPerSection: Math.max(1, imagesPerSection),
+        videosPerSection: Math.max(1, videosPerSection),
+        language,
+        mediaSource,
+      });
+    } else if (customInstructions) {
       userPrompt = buildCustomPrompt({
         fmt: scriptFormat,
         topic,
@@ -157,6 +176,8 @@ export class ClaudeGGProvider implements LLMProvider {
         imagesPerSection: Math.max(1, imagesPerSection),
         customInstructions,
         videosPerSection: Math.max(1, videosPerSection),
+        language,
+        mediaSource,
       });
     } else {
       userPrompt = buildUserPrompt({
@@ -167,6 +188,8 @@ export class ClaudeGGProvider implements LLMProvider {
         lengthInstruction,
         imagesPerSection: Math.max(1, imagesPerSection),
         videosPerSection: Math.max(1, videosPerSection),
+        language,
+        mediaSource,
       });
     }
 
@@ -258,7 +281,9 @@ export class ClaudeGGProvider implements LLMProvider {
         // Outro
         let outro = (stripped['outro_narration'] as string) ?? '';
         if (!outro || outro.length < 20) {
-          outro = `And that wraps up our list! If you enjoyed this video, make sure to like, subscribe, and hit that notification bell so you never miss out on our next one. See you in the next video!`;
+          outro = language === 'tr'
+            ? `Ve bu videomuzun sonuna geldik! Beğendiyseniz abone olmayı ve beğeni butonuna basmayı unutmayın. Bir sonraki videoda görüşmek üzere!`
+            : `And that wraps up our list! If you enjoyed this video, make sure to like, subscribe, and hit that notification bell so you never miss out on our next one. See you in the next video!`;
         }
 
         // Intro/outro image prompts
@@ -269,7 +294,11 @@ export class ClaudeGGProvider implements LLMProvider {
         if (!outroImg) outroImg = `Cinematic closing shot for a video about: ${titleVal}, warm lighting, high detail, 16:9`;
 
         let introNarration = (stripped['intro_narration'] as string) ?? '';
-        if (!introNarration.trim()) introNarration = `Welcome! Today we're diving into ${titleVal}. Let's get started!`;
+        if (!introNarration.trim()) {
+          introNarration = language === 'tr'
+            ? `Hoş geldiniz! Bugün ${titleVal} konusunu ele alıyoruz. Hadi başlayalım!`
+            : `Welcome! Today we're diving into ${titleVal}. Let's get started!`;
+        }
 
         return {
           title: titleVal || topic,

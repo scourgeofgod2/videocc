@@ -6,7 +6,32 @@ import path from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
 import type { Script } from './models.js';
 
-export type RunStatus = 'pending' | 'running' | 'done' | 'error';
+export type RunStatus = 'pending' | 'running' | 'awaiting_approval' | 'awaiting_image_approval' | 'done' | 'error';
+
+export interface PipelineOpts {
+  scriptFormat?: string;
+  videoLength?: 'micro' | 'short' | 'medium' | 'long';
+  customInstructions?: string;
+  subtitles?: string[];
+  language?: 'en' | 'tr';
+  aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3' | '3:4';
+  voiceId?: string;
+  voiceProvider?: string;
+  useGpu?: boolean;
+  gpuEncoder?: 'nvenc' | 'amf' | 'qsv';
+  imageModel?: 'kie' | 'nano-banana';
+  imagesPerSection?: number;
+  mediaSource?: 'ai_generate' | 'pexels_photo' | 'pexels_video' | 'ddg_image' | 'google_image';
+  captionFont?: string;
+  captionFontSize?: number;
+  captionTextColor?: string;
+  captionActiveColor?: string;
+  captionBgColor?: string;
+  captionBgOpacity?: number;
+  captionUppercase?: boolean;
+  captionPosition?: number;
+  rawText?: string;
+}
 
 export interface RunState {
   id: string;
@@ -25,6 +50,8 @@ export interface RunState {
   logs: string[];
   createdAt: string;
   updatedAt: string;
+  /** Saved pipeline options — used when resuming after script approval */
+  pipelineOpts?: PipelineOpts;
 }
 
 // ── In-memory store ───────────────────────────────────────────────────────────
@@ -62,12 +89,13 @@ export function loadPersistedState(): void {
     if (!fs.existsSync(STATE_FILE)) return;
     const arr = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) as RunState[];
     for (const run of arr) {
-      // Mark any "running" runs from before restart as error
+      // Mark any "running" or "awaiting_approval" runs from before restart as error
       if (run.status === 'running') {
         run.status = 'error';
         run.error = 'Server restarted while running';
         run.logs.push('[state] Run interrupted by server restart');
       }
+      // awaiting_approval and awaiting_image_approval survive restarts — user can still act
       runs.set(run.id, run);
     }
     console.log(`[state] loaded ${runs.size} run(s) from disk`);

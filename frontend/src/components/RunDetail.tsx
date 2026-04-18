@@ -1,179 +1,351 @@
 import { useEffect, useRef, useState } from "react"
-import { api, type RunState } from "../api/client"
+import { api } from "../api/client"
+import type { RunState } from "../api/client"
+import { ImageApprovalPanel } from "./ImageApprovalPanel"
+import { WizardNav } from "./TopicForm"
 
 interface Props {
   run: RunState
   onDelete: () => void
   onReassemble: () => void
+  onRunUpdated: (run: RunState) => void
 }
 
-const STATUS_LABEL: Record<RunState["status"], string> = {
-  pending: "Bekliyor",
-  running: "Üretiliyor",
-  done:    "Tamamlandı",
-  error:   "Hata",
+interface ScriptData {
+  title?: string
+  format?: string
+  language?: string
+  intro_narration?: string
+  outro_narration?: string
+  sections?: Array<{
+    heading?: string
+    title?: string
+    narration: string
+  }>
 }
 
-const LENGTH_LABEL: Record<string, string> = {
-  micro: "Mikro (<60sn)",
-  short: "Kısa",
-  medium: "Orta",
-  long: "Uzun",
+/** Maps run status to wizard step index (steps 0-3 are in TopicForm, 4-6 are here) */
+function statusToStep(status: string): number {
+  switch (status) {
+    case "pending":
+    case "running":
+      return 4 // İnceleme — actively processing
+    case "awaiting_approval":
+      return 4 // Script review
+    case "awaiting_image_approval":
+      return 5 // Image review
+    case "done":
+      return 6 // Video
+    case "error":
+      return 4
+    default:
+      return 4
+  }
 }
 
-export function RunDetail({ run, onDelete, onReassemble }: Props) {
-  const [logs, setLogs] = useState<string[]>(run.logs ?? [])
-  const [status, setStatus] = useState(run.status)
-  const [activeTab, setActiveTab] = useState<"logs" | "video">("logs")
-  const logsEndRef = useRef<HTMLDivElement>(null)
+export function RunDetail({ run, onDelete, onReassemble, onRunUpdated }: Props) {
+  const [logs, setLogs] = useState<string[]>([])
+  const [activeTab, setActiveTab] = useState<"logs" | "script" | "images" | "video">("logs")
+  const [script, setScript] = useState<ScriptData | null>(null)
   const unsubRef = useRef<(() => void) | null>(null)
+  const logsEndRef = useRef<HTMLDivElement>(null)
 
-  // Stream logs if running
   useEffect(() => {
-    setLogs(run.logs ?? [])
-    setStatus(run.status)
+    setLogs([])
+    setScript(null)
+    setActiveTab("logs")
+    if (unsubRef.current) unsubRef.current()
 
     if (run.status === "running" || run.status === "pending") {
-      unsubRef.current?.()
       unsubRef.current = api.streamLogs(
         run.id,
         (line) => setLogs((prev) => [...prev, line]),
         (s) => {
-          setStatus(s as RunState["status"])
+          if (s === "awaiting_approval") setActiveTab("script")
+          if (s === "awaiting_image_approval") setActiveTab("images")
           if (s === "done") setActiveTab("video")
-        },
+        }
       )
+    } else if (run.status === "awaiting_approval") {
+      setActiveTab("script")
+    } else if (run.status === "awaiting_image_approval") {
+      setActiveTab("images")
+    } else if (run.status === "done") {
+      setActiveTab("video")
     }
 
-    return () => { unsubRef.current?.() }
-  }, [run.id, run.status])
+    if (run.script) {
+      setScript(run.script as ScriptData)
+    }
 
-  // Auto-scroll logs
+    return () => { if (unsubRef.current) unsubRef.current() }
+  }, [run.id])
+
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [logs])
 
-  const videoUrl = run.videoPath
-    ? `/api/runs/${run.id}/video`
-    : null
+  // Sync tab when run.status changes externally (polling)
+  useEffect(() => {
+    if (run.status === "awaiting_approval" && activeTab === "logs") setActiveTab("script")
+    if (run.status === "awaiting_image_approval" && activeTab !== "images") setActiveTab("images")
+    if (run.status === "done" && activeTab !== "video") setActiveTab("video")
+  }, [run.status])
+
+  useEffect(() => {
+    if (run.script) {
+      setScript(run.script as ScriptData)
+    }
+  }, [run.script])
+
+  const handleApprove = async () => {
+    const res = await api.approveScript(run.id)
+    onRunUpdated(res)
+    setActiveTab("logs")
+    if (unsubRef.current) unsubRef.current()
+    unsubRef.current = api.streamLogs(
+      run.id,
+      (line) => setLogs((prev) => [...prev, line]),
+      (s) => {
+        if (s === "awaiting_image_approval") setActiveTab("images")
+        if (s === "done") setActiveTab("video")
+      }
+    )
+  }
+
+  const handleRegenerate = async () => {
+    const res = await api.regenerateScript(run.id)
+    onRunUpdated(res)
+    setActiveTab("logs")
+    if (unsubRef.current) unsubRef.current()
+    unsubRef.current = api.streamLogs(
+      run.id,
+      (line) => setLogs((prev) => [...prev, line]),
+      (s) => {
+        if (s === "awaiting_approval") setActiveTab("script")
+        if (s === "awaiting_image_approval") setActiveTab("images")
+        if (s === "done") setActiveTab("video")
+      }
+    )
+  }
+
+  const wizardStep = statusToStep(run.status)
+
+  // Allow clicking completed wizard steps to switch tabs
+  const handleWizardStepClick = (i: number) => {
+    if (i === 4 && (run.status === "awaiting_approval" || run.status === "done" || run.status === "awaiting_image_approval")) {
+      setActiveTab("script")
+    } else if (i === 5 && (run.status === "awaiting_image_approval" || run.status === "done")) {
+      setActiveTab("images")
+    } else if (i === 6 && run.status === "done") {
+      setActiveTab("video")
+    }
+  }
+
+  const statusLabel: Record<string, string> = {
+    pending: "⏳ Bekliyor",
+    running: "🔄 Çalışıyor",
+    awaiting_approval: "✍️ Onay Bekliyor",
+    awaiting_image_approval: "🖼️ Görsel Onayı",
+    done: "✅ Tamamlandı",
+    error: "❌ Hata",
+  }
 
   return (
-    <div className="panel" style={{ height: "100%" }}>
+    <div className="run-detail">
+      {/* Unified wizard nav — steps 0-3 are "done" (form submitted), 4-6 are active/pending */}
+      <WizardNav step={wizardStep} onStepClick={handleWizardStepClick} />
 
-      {/* Header */}
-      <div className="detail-header">
-        <div>
-          <h2 className="detail-title">{run.topic}</h2>
+      <div className="run-detail__header">
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span className="run-detail__title">{run.topic}</span>
+          <span className="run-detail__status">{statusLabel[run.status] ?? run.status}</span>
         </div>
-        <div className="detail-actions">
-          {(status === "done" || status === "error") && (
-            <button
-              className="btn btn--ghost"
-              onClick={onReassemble}
-              title="Videoyu yeniden birleştir"
-            >
-              ↺ Yeniden
+        <div style={{ display: "flex", gap: 8 }}>
+          {run.status === "done" && (
+            <button className="btn btn--ghost btn--sm" onClick={onReassemble}>
+              🔄 Yeniden Birleştir
             </button>
           )}
-          <button className="btn btn--danger" onClick={onDelete}>
-            ✕ Sil
+          <button className="btn btn--ghost btn--sm btn--danger" onClick={onDelete}>
+            🗑️ Sil
           </button>
         </div>
       </div>
 
-      {/* Meta row */}
-      <div className="detail-meta">
-        <span className={`badge badge--${status}`}>{STATUS_LABEL[status]}</span>
-        <span className="badge">{run.scriptFormat}</span>
-        <span className="badge">{LENGTH_LABEL[run.videoLength] ?? run.videoLength}</span>
-        <span className="badge">{run.numSections} bölüm</span>
-        <span className="badge">{run.language === "tr" ? "🇹🇷 TR" : "🇬🇧 EN"}</span>
-        <span className="badge">{run.aspectRatio}</span>
-      </div>
-
-      {/* Tabs */}
-      <div className="tabs">
+      {/* Secondary tab nav for within-step navigation */}
+      <div className="run-detail__tabs">
         <button
-          className={`tab-btn${activeTab === "logs" ? " active" : ""}`}
+          className={`run-detail__tab${activeTab === "logs" ? " run-detail__tab--active" : ""}`}
           onClick={() => setActiveTab("logs")}
         >
-          Loglar
+          📋 Loglar
         </button>
-        <button
-          className={`tab-btn${activeTab === "video" ? " active" : ""}`}
-          onClick={() => setActiveTab("video")}
-          disabled={!videoUrl}
-        >
-          Video
-        </button>
+        {(run.status === "awaiting_approval" || script) && (
+          <button
+            className={`run-detail__tab${activeTab === "script" ? " run-detail__tab--active" : ""}`}
+            onClick={() => setActiveTab("script")}
+          >
+            ✍️ Script İncele
+          </button>
+        )}
+        {(run.status === "awaiting_image_approval" || run.status === "done") && (
+          <button
+            className={`run-detail__tab${activeTab === "images" ? " run-detail__tab--active" : ""}`}
+            onClick={() => setActiveTab("images")}
+          >
+            🖼️ Görseller
+          </button>
+        )}
+        {run.status === "done" && (
+          <button
+            className={`run-detail__tab${activeTab === "video" ? " run-detail__tab--active" : ""}`}
+            onClick={() => setActiveTab("video")}
+          >
+            🎬 Video
+          </button>
+        )}
       </div>
 
       {/* Tab content */}
-      {activeTab === "logs" && (
-        <div style={{ padding: 16 }}>
-          {/* Running indicator */}
-          {status === "running" && (
-            <div className="playing-bar active" style={{ marginBottom: 12 }}>
-              <div className="playing-bar__waves" aria-hidden="true">
-                <span /><span /><span /><span /><span />
-              </div>
-              <span className="playing-bar__text">Üretiliyor…</span>
-            </div>
-          )}
+      <div className="run-detail__content">
+        {activeTab === "images" && (
+          <ImageApprovalPanel
+            runId={run.id}
+            onApprove={async () => {
+              const res = await api.approveImages(run.id)
+              onRunUpdated(res)
+              setActiveTab("logs")
+              if (unsubRef.current) unsubRef.current()
+              unsubRef.current = api.streamLogs(
+                run.id,
+                (line) => setLogs((prev) => [...prev, line]),
+                (s) => { if (s === "done") setActiveTab("video") }
+              )
+            }}
+            onRegenerate={async () => {
+              const res = await api.regenerateImages(run.id)
+              onRunUpdated(res)
+              setActiveTab("logs")
+              if (unsubRef.current) unsubRef.current()
+              unsubRef.current = api.streamLogs(
+                run.id,
+                (line) => setLogs((prev) => [...prev, line]),
+                (s) => {
+                  if (s === "awaiting_image_approval") setActiveTab("images")
+                  if (s === "done") setActiveTab("video")
+                }
+              )
+            }}
+          />
+        )}
 
-          <div className="log-box">
-            {logs.length === 0 ? (
-              <span style={{ color: "var(--text-muted)" }}>Henüz log yok…</span>
+        {activeTab === "script" && (
+          <div className="script-review">
+            <div className="script-review__actions">
+              <button className="btn btn--primary" onClick={handleApprove} disabled={run.status !== "awaiting_approval"}>
+                ✅ Onayla & Devam Et
+              </button>
+              <button className="btn btn--ghost" onClick={handleRegenerate} disabled={run.status !== "awaiting_approval"}>
+                🔄 Yeniden Oluştur
+              </button>
+            </div>
+            {script ? (
+              <div className="script-review__content">
+                <h2>{script.title}</h2>
+                <p style={{ opacity: 0.6, fontSize: 13 }}>{script.format} · {script.language}</p>
+                {script.intro_narration && (
+                  <div className="script-section script-section--intro">
+                    <h3>🎬 Giriş (Intro)</h3>
+                    <p>{script.intro_narration}</p>
+                  </div>
+                )}
+                {script.sections?.map((sec, i) => (
+                  <div key={i} className="script-section">
+                    <h3>{sec.heading ?? sec.title ?? `Bölüm ${i + 1}`}</h3>
+                    <p>{sec.narration}</p>
+                  </div>
+                ))}
+                {script.outro_narration && (
+                  <div className="script-section script-section--outro">
+                    <h3>🎬 Kapanış (Outro)</h3>
+                    <p>{script.outro_narration}</p>
+                  </div>
+                )}
+              </div>
             ) : (
-              logs.map((line, i) => {
-                const cls = line.includes("error") || line.includes("hata")
-                  ? "log-line--error"
-                  : line.includes("done") || line.includes("tamamland")
-                    ? "log-line--done"
-                    : "log-line--info"
-                return (
-                  <div key={i} className={`log-line ${cls}`}>{line}</div>
-                )
-              })
+              <p style={{ opacity: 0.5 }}>Script yükleniyor...</p>
             )}
-            <div ref={logsEndRef} />
           </div>
+        )}
 
-          {status === "error" && run.error && (
-            <div style={{ marginTop: 12, padding: "12px 14px", border: "var(--border-w) solid var(--danger)", background: "rgba(255,71,87,0.07)", fontSize: 13, color: "var(--danger)" }}>
-              ⚠ {run.error}
-            </div>
-          )}
-        </div>
-      )}
+        {activeTab === "video" && (
+          <div className="video-tab">
+            {run.videoPath ? (
+              <video
+                src={`/api/runs/${run.id}/video`}
+                controls
+                style={{ width: "100%", maxWidth: 720, borderRadius: 12 }}
+              />
+            ) : (
+              <p style={{ opacity: 0.5 }}>Video henüz hazır değil.</p>
+            )}
+          </div>
+        )}
 
-      {activeTab === "video" && (
-        <div style={{ padding: 16 }}>
-          {videoUrl ? (
-            <>
-              <div className="video-wrap">
-                <video controls src={videoUrl} />
+        {activeTab === "logs" && (
+          <div className="logs-panel">
+            {/* Running indicator */}
+            {(run.status === "running" || run.status === "pending") && (
+              <div className="logs-panel__running">
+                <span className="logs-panel__dot" />
+                {run.status === "pending" ? "İşlem kuyruğa alındı, başlatılıyor…" : "İşlem devam ediyor…"}
               </div>
-              <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
-                <a
-                  href={videoUrl}
-                  download={`${run.topic}.mp4`}
-                  className="btn btn--primary"
-                >
-                  ↓ MP4 İndir
-                </a>
+            )}
+
+            {run.status === "error" && (
+              <div className="logs-panel__error-banner">
+                ❌ Hata: {run.error ?? "Bilinmeyen hata"}
               </div>
-            </>
-          ) : (
-            <div className="video-wrap">
-              <div className="video-placeholder">
-                <div style={{ fontSize: 32, marginBottom: 8 }}>🎬</div>
-                <p>Video henüz hazır değil</p>
-              </div>
+            )}
+
+            <div className="logs">
+              {logs.length === 0 && run.status !== "error" ? (
+                <p style={{ opacity: 0.4, fontSize: 13, padding: "8px 0" }}>Log bekleniyor…</p>
+              ) : (
+                logs.map((line, i) => {
+                  const isErr = line.startsWith("[ERROR]") || line.toLowerCase().includes("error")
+                  const isWarn = line.startsWith("[WARN]")
+                  const isStep = /^step \d+\/\d+:/i.test(line)
+                  const isDone = /^(all media generated|all voiceovers|video assembled|done|tamamlandı)/i.test(line)
+                  const isImgDone = /^image done:/i.test(line)
+                  const isImgStart = /^image start:/i.test(line)
+                  const isMediaSrc = /^media source:/i.test(line)
+                  const isSkip = /^skip /i.test(line)
+
+                  let cls = "log-line"
+                  let prefix = ""
+                  if (isErr) { cls += " log-line--error"; prefix = "❌ " }
+                  else if (isWarn) { cls += " log-line--warn"; prefix = "⚠️ " }
+                  else if (isStep) { cls += " log-line--step"; prefix = "▶ " }
+                  else if (isDone) { cls += " log-line--done"; prefix = "✅ " }
+                  else if (isImgDone) { cls += " log-line--img-done"; prefix = "🖼️ " }
+                  else if (isImgStart) { cls += " log-line--img-start"; prefix = "⬇️ " }
+                  else if (isMediaSrc) { cls += " log-line--media-src"; prefix = "📌 " }
+                  else if (isSkip) { cls += " log-line--skip" }
+
+                  return (
+                    <div key={i} className={cls}>
+                      {prefix}{line}
+                    </div>
+                  )
+                })
+              )}
+              <div ref={logsEndRef} />
             </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

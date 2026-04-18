@@ -1,104 +1,121 @@
 /**
- * Subtitle (ASS) generator
+ * Subtitle (ASS) generator — TikTok-style karaoke captions
  *
- * Converts per-clip Lemonfox word timestamps into a single ASS (Advanced SubStation Alpha)
- * subtitle file that ffmpeg can burn into the video with a drawtext/ass filter.
+ * Converts per-clip Lemonfox word timestamps into a single ASS subtitle file
+ * that ffmpeg burns into the video via the `ass=` filter.
  *
- * ASS is chosen over SRT because it supports fine-grained styling:
- *   - custom font, size, colour, bold
- *   - vertical position (bottom of frame with margin)
- *   - outline/shadow for readability
- *   - per-word karaoke timing (optional, not used here — we do phrase-groups)
+ * Karaoke approach:
+ *   - Words are grouped into small chunks (wordsPerGroup)
+ *   - For each active word window, a Dialogue line is emitted
+ *   - The active word is coloured with `caption_active_color`
+ *   - Inactive words use `caption_text_color`
+ *   - ASS BorderStyle=3 + BackColour gives an opaque rounded box background
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import type { VideoConfig, CaptionWord } from '../models.js';
 
-// ── Caption config defaults ───────────────────────────────────────────────────
+// ── Caption config ────────────────────────────────────────────────────────────
 
 export interface CaptionConfig {
-  /** Font family name (must be available on the system or in ffmpeg) */
   fontName: string;
-  /** Font size in pixels (relative to 1080p — scaled by ffmpeg) */
   fontSize: number;
-  /** Primary colour: &HAABBGGRR in ASS format, or hex #RRGGBB converted internally */
-  primaryColour: string;
-  /** Outline colour */
+  primaryColour: string;   // text (inactive words) — ASS &H00BBGGRR
+  activeColour: string;    // active word highlight
+  backColour: string;      // box background — ASS &HAABBGGRR (AA = alpha 0=opaque)
   outlineColour: string;
-  /** Outline thickness */
   outline: number;
-  /** Shadow depth */
   shadow: number;
-  /** Bold (1 = bold) */
   bold: number;
-  /** Vertical margin from bottom of frame (pixels) */
   marginV: number;
-  /** Max words per caption group */
   wordsPerGroup: number;
-  /** Convert text to UPPERCASE */
   uppercase: boolean;
 }
 
-function resolveColour(hex: string): string {
-  // Accepts #RRGGBB → &H00BBGGRR  (ASS format, no alpha = 00)
-  // Also passes through &HAABBGGRR as-is
+// ── Colour helpers ────────────────────────────────────────────────────────────
+
+/** #RRGGBB → &H00BBGGRR  (no transparency) */
+function hexToAss(hex: string): string {
   if (hex.startsWith('&H')) return hex;
-  const r = hex.slice(1, 3);
-  const g = hex.slice(3, 5);
-  const b = hex.slice(5, 7);
+  const h = hex.replace('#', '');
+  if (h.length < 6) return '&H00FFFFFF';
+  const r = h.slice(0, 2); const g = h.slice(2, 4); const b = h.slice(4, 6);
   return `&H00${b}${g}${r}`;
 }
 
-function defaultCaptionConfig(vc: VideoConfig): CaptionConfig {
+/** #RRGGBB + opacity 0-255 → &HAABBGGRR  (AA: 0=opaque, FF=transparent) */
+function hexToAssWithAlpha(hex: string, opacity: number): string {
+  if (hex.startsWith('&H')) return hex;
+  const h = hex.replace('#', '');
+  if (h.length < 6) return `&H80000000`;
+  const r = h.slice(0, 2); const g = h.slice(2, 4); const b = h.slice(4, 6);
+  // ASS alpha is INVERTED: 0=fully opaque, FF=fully transparent
+  const alpha = Math.round(255 - Math.min(255, Math.max(0, opacity)));
+  const aa = alpha.toString(16).padStart(2, '0').toUpperCase();
+  return `&H${aa}${b}${g}${r}`;
+}
+
+/** Convert caption_position (0-100% from top) to ASS marginV (pixels from bottom).
+ *  caption_position=75 → 75% from top → 25% from bottom.
+ *  On 1080p: 25% * 1080 ≈ 270px from bottom.
+ *  On 1920x1080: typical safe zone is 50-200px from bottom.
+ */
+function positionToMarginV(positionPct: number, resH: number): number {
+  const pct = Math.max(5, Math.min(95, positionPct));
+  // distance from bottom = (100 - pct) / 100 * resH
+  return Math.round(((100 - pct) / 100) * resH);
+}
+
+function defaultCaptionConfig(vc: VideoConfig, resH: number): CaptionConfig {
+  const opacity = vc.caption_bg_opacity ?? 180;
+  const posPct  = vc.caption_position  ?? 75;
   return {
-    fontName:      vc.caption_font      ?? 'Inter',
-    fontSize:      vc.caption_font_size ?? 60,
-    primaryColour: resolveColour(vc.caption_text_color ?? '#FFFFFF'),
-    outlineColour: resolveColour('#000000'),
-    outline:       2,
-    shadow:        1,
+    fontName:      vc.caption_font         ?? 'Inter',
+    fontSize:      vc.caption_font_size    ?? 60,
+    primaryColour: hexToAss(vc.caption_text_color    ?? '#FFFFFF'),
+    activeColour:  hexToAss(vc.caption_active_color  ?? '#FFFF32'),
+    backColour:    hexToAssWithAlpha(vc.caption_bg_color ?? '#1A0033', opacity),
+    outlineColour: hexToAss('#000000'),
+    outline:       0,
+    shadow:        0,
     bold:          1,
-    marginV:       vc.caption_position  ?? 550,   // higher up from bottom
+    marginV:       positionToMarginV(posPct, resH),
     wordsPerGroup: 5,
-    uppercase:     vc.caption_uppercase ?? true,
+    uppercase:     vc.caption_uppercase   ?? true,
   };
 }
 
-// ── ASS timestamp helper ──────────────────────────────────────────────────────
+// ── ASS timestamp ─────────────────────────────────────────────────────────────
 
-/** Convert seconds to ASS timestamp: H:MM:SS.cc */
 function toAssTime(secs: number): string {
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
   const s = Math.floor(secs % 60);
-  const cs = Math.floor((secs % 1) * 100); // centiseconds
+  const cs = Math.floor((secs % 1) * 100);
   return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
 }
 
 // ── Caption clip descriptor ───────────────────────────────────────────────────
 
 export interface CaptionClip {
-  /** Offset of this clip's audio within the final concatenated video (seconds) */
   offset: number;
-  /** Duration of this clip (seconds) — for safety clamping */
   duration: number;
-  /** Label for debug */
   label: string;
-  /** Word-level timestamps (from Lemonfox, stored as CaptionWord in models) */
   words: CaptionWord[];
 }
 
 // ── ASS file builder ──────────────────────────────────────────────────────────
 
 /**
- * Build an ASS subtitle file from multiple caption clips (each with a time offset).
+ * Build karaoke-style ASS subtitle file.
  *
- * @param clips      Caption clips with word timestamps and offsets
- * @param outputPath Where to write the ASS file
- * @param videoConfig VideoConfig for style settings
- * @param resolution [width, height] of the output video
- * @returns          Path to the written ASS file
+ * Strategy:
+ * - Group words into chunks of `wordsPerGroup`
+ * - For each word position in the group, emit one Dialogue line covering
+ *   that word's time window, with inline colour tags:
+ *     active word → activeColour
+ *     others      → primaryColour (text)
  */
 export function buildAssFile(
   clips: CaptionClip[],
@@ -106,8 +123,8 @@ export function buildAssFile(
   videoConfig: VideoConfig,
   resolution: [number, number] = [1920, 1080],
 ): string {
-  const cfg = defaultCaptionConfig(videoConfig);
   const [resW, resH] = resolution;
+  const cfg = defaultCaptionConfig(videoConfig, resH);
 
   // ── ASS header ──
   const header = [
@@ -120,8 +137,9 @@ export function buildAssFile(
     '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    // BorderStyle=3 → opaque box background using BackColour
     // Alignment=2 → bottom-center
-    `Style: Default,${cfg.fontName},${cfg.fontSize},${cfg.primaryColour},${cfg.primaryColour},${cfg.outlineColour},&H00000000,${cfg.bold},0,0,0,100,100,0,0,1,${cfg.outline},${cfg.shadow},2,10,10,${cfg.marginV},1`,
+    `Style: Default,${cfg.fontName},${cfg.fontSize},${cfg.primaryColour},${cfg.primaryColour},${cfg.outlineColour},${cfg.backColour},${cfg.bold},0,0,0,100,100,0,0,3,${cfg.outline},${cfg.shadow},2,20,20,${cfg.marginV},1`,
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
@@ -132,22 +150,43 @@ export function buildAssFile(
   for (const clip of clips) {
     if (clip.words.length === 0) continue;
 
-    // Group words into chunks of cfg.wordsPerGroup
+    // Group words into chunks
     for (let i = 0; i < clip.words.length; i += cfg.wordsPerGroup) {
       const group = clip.words.slice(i, i + cfg.wordsPerGroup);
-      const start = clip.offset + group[0].start;
-      const end   = clip.offset + group[group.length - 1].end;
+      if (group.length === 0) continue;
 
-      // Clamp to clip boundary
-      const clampedStart = Math.max(0, start);
-      const clampedEnd   = Math.min(clip.offset + clip.duration, end + 0.05); // +50ms grace
+      // Prepare display text for each word in the group
+      const texts = group.map(w => {
+        let t = w.word.trim();
+        if (cfg.uppercase) t = t.toUpperCase();
+        return t;
+      });
 
-      let text = group.map(w => w.word.trim()).join(' ');
-      if (cfg.uppercase) text = text.toUpperCase();
+      // Emit one Dialogue line per active word
+      for (let activeIdx = 0; activeIdx < group.length; activeIdx++) {
+        const activeWord = group[activeIdx];
+        const start = clip.offset + activeWord.start;
+        const end   = clip.offset + activeWord.end;
 
-      dialogueLines.push(
-        `Dialogue: 0,${toAssTime(clampedStart)},${toAssTime(clampedEnd)},Default,,0,0,0,,${text}`,
-      );
+        const clampedStart = Math.max(0, start);
+        const clampedEnd   = Math.min(clip.offset + clip.duration, end + 0.05);
+        if (clampedEnd <= clampedStart) continue;
+
+        // Build inline-coloured text
+        // {\c&Hcolor&} changes primary colour for subsequent text
+        // {\r} resets to Style default (= primaryColour)
+        const parts = texts.map((t, idx) => {
+          if (idx === activeIdx) {
+            return `{\\c${cfg.activeColour}}${t}{\\c${cfg.primaryColour}}`;
+          }
+          return t;
+        });
+        const text = parts.join(' ');
+
+        dialogueLines.push(
+          `Dialogue: 0,${toAssTime(clampedStart)},${toAssTime(clampedEnd)},Default,,0,0,0,,${text}`,
+        );
+      }
     }
   }
 

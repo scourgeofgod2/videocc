@@ -68,6 +68,7 @@ const PACING_RULES =
 
 interface FormatConfig {
   label: string;
+  description?: string;
   continuous: boolean;
   systemPrompt: string;
   narrationExample: string;
@@ -83,6 +84,7 @@ interface FormatConfig {
 const FORMATS: Record<string, FormatConfig> = {
   listicle: {
     label: 'Liste',
+    description: 'Numaralı sayım — "5 numara, ..."',
     continuous: false,
     systemPrompt:
       'You are an engaging YouTube script writer. Output ONLY valid JSON, nothing else.\n' +
@@ -103,6 +105,7 @@ const FORMATS: Record<string, FormatConfig> = {
   },
   true_crime: {
     label: 'Gerçek Suç',
+    description: 'Gerilim dolu, karanlık, gizem anlatısı',
     continuous: true,
     systemPrompt:
       'You are a compelling true-crime documentary narrator. Output ONLY valid JSON, nothing else.\n' +
@@ -125,6 +128,7 @@ const FORMATS: Record<string, FormatConfig> = {
   },
   history: {
     label: 'Tarih / Belgesel',
+    description: 'Belgesel tarzı, kronolojik anlatı',
     continuous: true,
     systemPrompt:
       'You are an authoritative yet engaging history documentary narrator. Output ONLY valid JSON, nothing else.\n' +
@@ -147,6 +151,7 @@ const FORMATS: Record<string, FormatConfig> = {
   },
   tutorial: {
     label: 'Nasıl Yapılır',
+    description: 'Adım adım eğitici rehber',
     continuous: false,
     systemPrompt:
       'You are a clear, friendly, and expert tutorial presenter. Output ONLY valid JSON, nothing else.\n' +
@@ -169,6 +174,7 @@ const FORMATS: Record<string, FormatConfig> = {
   },
   story: {
     label: 'Hikaye / Anlatı',
+    description: 'Sürükleyici serbest biçim anlatısı',
     continuous: true,
     systemPrompt:
       'You are a masterful storyteller and YouTube narrator. Output ONLY valid JSON, nothing else.\n' +
@@ -192,6 +198,7 @@ const FORMATS: Record<string, FormatConfig> = {
   },
   essay: {
     label: 'Video Deneme',
+    description: 'Analitik, fikir odaklı yorum',
     continuous: false,
     systemPrompt:
       'You are a thoughtful, analytical video essayist. Output ONLY valid JSON, nothing else.\n' +
@@ -214,6 +221,7 @@ const FORMATS: Record<string, FormatConfig> = {
   },
   motivation: {
     label: 'Motivasyon',
+    description: 'İlham veren, güçlendirici içerik',
     continuous: false,
     systemPrompt:
       'You are a powerful motivational speaker and YouTube creator. Output ONLY valid JSON, nothing else.\n' +
@@ -236,6 +244,7 @@ const FORMATS: Record<string, FormatConfig> = {
   },
   technology: {
     label: 'Teknoloji',
+    description: 'Teknoloji incelemesi ve açıklaması',
     continuous: false,
     systemPrompt:
       'You are an expert tech reviewer and YouTube creator. Output ONLY valid JSON, nothing else.\n' +
@@ -258,6 +267,7 @@ const FORMATS: Record<string, FormatConfig> = {
   },
   travel: {
     label: 'Gezi / Seyahat',
+    description: 'Gezi belgesi, yer tanıtımı',
     continuous: false,
     systemPrompt:
       'You are a passionate travel filmmaker and YouTube creator. Output ONLY valid JSON, nothing else.\n' +
@@ -303,6 +313,27 @@ function buildMediaRules(f: FormatConfig, imagesPerSection: number, videosPerSec
   return parts.join('\n');
 }
 
+// Build a note about search query language based on mediaSource + language
+function buildSearchQueryNote(language: 'en' | 'tr', mediaSource: string): string {
+  const isSearchProvider = mediaSource === 'ddg_image' || mediaSource === 'google_image';
+  if (!isSearchProvider) return '';
+  if (language === 'tr') {
+    return (
+      `\n- image_prompts must be SHORT TURKISH SEARCH QUERIES suitable for a web image search engine (Google/DuckDuckGo)\n` +
+      `  - Write in Turkish (e.g. "İstanbul boğazı gün batımı", "yapay zeka robot çizimi")\n` +
+      `  - Maximum 8 words per query — use only descriptive nouns and adjectives\n` +
+      `  - NO cinematic language, NO "photorealistic", NO "4K", NO "dramatic lighting" — plain search terms only\n` +
+      `  - DO NOT write image generation prompts — write image SEARCH queries`
+    );
+  }
+  return (
+    `\n- image_prompts must be SHORT ENGLISH SEARCH QUERIES suitable for a web image search engine (Google/DuckDuckGo)\n` +
+    `  - Maximum 8 words per query — use only descriptive nouns and adjectives\n` +
+    `  - NO cinematic language, NO "photorealistic", NO "4K", NO "dramatic lighting" — plain search terms only\n` +
+    `  - DO NOT write image generation prompts — write image SEARCH queries`
+  );
+}
+
 export function buildUserPrompt(opts: {
   fmt: string;
   topic: string;
@@ -311,15 +342,20 @@ export function buildUserPrompt(opts: {
   lengthInstruction: string;
   imagesPerSection: number;
   videosPerSection?: number;
+  language?: 'en' | 'tr';
+  mediaSource?: string;
 }): string {
-  const { fmt, topic, numSections, styleInstruction, lengthInstruction, imagesPerSection, videosPerSection = 1 } = opts;
+  const { fmt, topic, numSections, styleInstruction, lengthInstruction, imagesPerSection, videosPerSection = 1, language = 'en', mediaSource = 'ai_generate' } = opts;
   const f = FORMATS[fmt] ?? FORMATS['listicle'];
   const jsonBlock = buildJsonBlock(f);
   const mediaRules = buildMediaRules(f, imagesPerSection, videosPerSection);
   const sectionLabel = fmt === 'listicle' ? 'sections' : 'chapters';
+  const searchNote = buildSearchQueryNote(language, mediaSource);
+  const langNote = language === 'tr' ? `Write ALL narration text in Turkish.\n` : '';
 
   return (
     `Create a ${f.label.toLowerCase()} script about: "${topic}"\n` +
+    `${langNote}` +
     `${styleInstruction}\n` +
     `${lengthInstruction}\n\n` +
     `Return ONLY this JSON (no other text):\n` +
@@ -329,7 +365,8 @@ export function buildUserPrompt(opts: {
     `- STRICTLY follow the VIDEO LENGTH guidelines above for narration length in intro, sections, and outro\n` +
     `- intro_image_prompt: must be an eye-catching YouTube thumbnail with short catchy bold text centered in the image\n` +
     `${f.rules}\n` +
-    `${mediaRules}\n` +
+    `${mediaRules}` +
+    `${searchNote}\n` +
     `- outro_image_prompt: must be a visually striking image RELEVANT to the video topic, with subscribe and like buttons overlaid in a corner\n` +
     `- All narration should sound natural when spoken aloud`
   );
@@ -344,12 +381,16 @@ export function buildCustomPrompt(opts: {
   imagesPerSection: number;
   customInstructions: string;
   videosPerSection?: number;
+  language?: 'en' | 'tr';
+  mediaSource?: string;
 }): string {
-  const { fmt, topic, numSections, styleInstruction, lengthInstruction, imagesPerSection, customInstructions, videosPerSection = 1 } = opts;
+  const { fmt, topic, numSections, styleInstruction, lengthInstruction, imagesPerSection, customInstructions, videosPerSection = 1, language = 'en', mediaSource = 'ai_generate' } = opts;
   const f = FORMATS[fmt] ?? FORMATS['listicle'];
   const jsonBlock = buildJsonBlock(f);
   const mediaRules = buildMediaRules(f, imagesPerSection, videosPerSection);
   const sectionLabel = fmt === 'listicle' ? 'sections' : 'chapters';
+  const searchNote = buildSearchQueryNote(language, mediaSource);
+  const langNote = language === 'tr' ? `Write ALL narration text in Turkish.\n` : '';
 
   return (
     `Use the following custom instructions to write the script:\n\n` +
@@ -357,6 +398,7 @@ export function buildCustomPrompt(opts: {
     `${customInstructions}\n` +
     `--- END CUSTOM INSTRUCTIONS ---\n\n` +
     `Topic: "${topic}"\n` +
+    `${langNote}` +
     `${styleInstruction}\n` +
     `${lengthInstruction}\n\n` +
     `You MUST output ONLY valid JSON in this exact format (no other text):\n` +
@@ -366,9 +408,55 @@ export function buildCustomPrompt(opts: {
     `- STRICTLY follow the VIDEO LENGTH guidelines above for narration length in intro, sections, and outro\n` +
     `- intro_image_prompt: must be an eye-catching YouTube thumbnail with short catchy bold text centered in the image\n` +
     `${f.rules}\n` +
-    `${mediaRules}\n` +
+    `${mediaRules}` +
+    `${searchNote}\n` +
     `- All narration should sound natural when spoken aloud\n` +
     `- Follow the custom instructions above for content, tone, and structure — but always output the JSON format specified`
+  );
+}
+
+export function buildRawTextPrompt(opts: {
+  fmt: string;
+  topic: string;
+  numSections: number;
+  rawText: string;
+  styleInstruction: string;
+  imagesPerSection: number;
+  videosPerSection?: number;
+  language?: 'en' | 'tr';
+  mediaSource?: string;
+}): string {
+  const { fmt, topic, numSections, rawText, styleInstruction, imagesPerSection, videosPerSection = 1, language = 'en', mediaSource = 'ai_generate' } = opts;
+  const f = FORMATS[fmt] ?? FORMATS['listicle'];
+  const jsonBlock = buildJsonBlock(f);
+  const mediaRules = buildMediaRules(f, imagesPerSection, videosPerSection);
+  const sectionLabel = fmt === 'listicle' ? 'sections' : 'chapters';
+  const searchNote = buildSearchQueryNote(language, mediaSource);
+  const langNote = language === 'tr'
+    ? `Write ALL narration text in Turkish. intro_narration and outro_narration must also be in Turkish.\n`
+    : '';
+
+  return (
+    `You are given RAW NARRATION TEXT for a video about: "${topic}"\n\n` +
+    `--- RAW TEXT ---\n${rawText}\n--- END RAW TEXT ---\n\n` +
+    `${langNote}` +
+    `Your task:\n` +
+    `1. Divide this text into EXACTLY ${numSections} ${sectionLabel}\n` +
+    `2. Keep the narration VERBATIM — do NOT paraphrase or rewrite\n` +
+    `3. Add a compelling video title\n` +
+    `4. Extract or compose a short intro narration (hook) and outro narration (call-to-action)\n` +
+    `5. Add a heading for each section\n` +
+    `6. Generate image_prompts and video_prompts for each section\n` +
+    `${styleInstruction}\n\n` +
+    `You MUST output ONLY valid JSON in this exact format (no other text):\n` +
+    `${jsonBlock}\n\n` +
+    `Rules:\n` +
+    `- Exactly ${numSections} ${sectionLabel} — split the text evenly\n` +
+    `- intro_image_prompt: must be an eye-catching YouTube thumbnail with short catchy bold text centered\n` +
+    `${f.rules}\n` +
+    `${mediaRules}` +
+    `${searchNote}\n` +
+    `- Keep narration text as close to the original as possible`
   );
 }
 
@@ -376,6 +464,6 @@ export function getSystemPrompt(fmt: string): string {
   return (FORMATS[fmt] ?? FORMATS['listicle']).systemPrompt;
 }
 
-export function getAvailableFormats(): Array<{ key: string; label: string }> {
-  return Object.entries(FORMATS).map(([key, f]) => ({ key, label: f.label }));
+export function getAvailableFormats(): Array<{ key: string; label: string; description: string }> {
+  return Object.entries(FORMATS).map(([key, f]) => ({ key, label: f.label, description: f.description ?? '' }));
 }

@@ -4,7 +4,7 @@ const BASE = "/api"
 
 export interface RunState {
   id: string
-  status: "pending" | "running" | "done" | "error"
+  status: "pending" | "running" | "awaiting_approval" | "awaiting_image_approval" | "done" | "error"
   topic: string
   numSections: number
   scriptFormat: string
@@ -32,14 +32,26 @@ export interface CreateRunBody {
   voiceProvider?: "cortexai" | "google_tts" | "inworld"
   customInstructions?: string
   subtitles?: string[]
+  rawText?: string
   useGpu?: boolean
   gpuEncoder?: "nvenc" | "amf" | "qsv"
   imageModel?: "kie" | "nano-banana"
+  mediaSource?: "ai_generate" | "pexels_photo" | "pexels_video" | "ddg_image" | "google_image"
+  imagesPerSection?: number
+  captionFont?: string
+  captionFontSize?: number
+  captionTextColor?: string
+  captionActiveColor?: string
+  captionBgColor?: string
+  captionBgOpacity?: number
+  captionUppercase?: boolean
+  captionPosition?: number
 }
 
 export interface FormatOption {
   key: string
   label: string
+  description: string
 }
 
 export interface GoogleTtsVoice {
@@ -68,10 +80,19 @@ export const api = {
     req<RunState>("/runs", { method: "POST", body: JSON.stringify(body) }),
   deleteRun: (id: string) => req<{ ok: boolean }>(`/runs/${id}`, { method: "DELETE" }),
   reassemble: (id: string) => req<RunState>(`/runs/${id}/reassemble`, { method: "POST" }),
+  approveScript: (id: string) => req<RunState>(`/runs/${id}/approve-script`, { method: "POST" }),
+  regenerateScript: (id: string) => req<RunState>(`/runs/${id}/regenerate-script`, { method: "POST" }),
+  approveImages: (id: string) => req<RunState>(`/runs/${id}/approve-images`, { method: "POST" }),
+  regenerateImages: (id: string) => req<RunState>(`/runs/${id}/regenerate-images`, { method: "POST" }),
+  getImages: (id: string) => req<{ images: string[] }>(`/runs/${id}/images`).then((r) => r.images),
+  regenerateSingleImage: (id: string, filename: string) =>
+    req<{ url: string; filename: string }>(`/runs/${id}/images/${filename}/regenerate`, { method: "POST" }),
   updateScript: (id: string, script: unknown) =>
     req<{ ok: boolean }>(`/runs/${id}/script`, { method: "PUT", body: JSON.stringify(script) }),
   getFormats: () => req<{ formats: FormatOption[] }>("/runs/formats").then((r) => r.formats),
   getGoogleVoices: () => req<{ voices: GoogleTtsVoice[] }>("/runs/voices/google").then((r) => r.voices),
+  getIdeas: (topic: string, format: string, language: string) =>
+    req<{ ideas: string[] }>(`/runs/ideas?topic=${encodeURIComponent(topic)}&format=${encodeURIComponent(format)}&language=${encodeURIComponent(language)}`).then((r) => r.ideas),
   streamLogs: (id: string, onLine: (line: string) => void, onDone: (status: string) => void): (() => void) => {
     const es = new EventSource(`/api/runs/${id}/logs`)
     es.onmessage = (e: MessageEvent) => {
